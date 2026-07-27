@@ -23,8 +23,8 @@ every sprite, tile, item icon and sound effect is computed at load time.
 | 8 | Items | done | 12k rolls: 0 rule violations; unique 0.61% at ilvl 12; MF works |
 | 9 | Monsters and AI | done | wake, separation, hit-frame, flee, resurrect, loot all verified |
 | 10 | Skills and projectiles | done | 14 skills; mana exact, teleport 200/200 safe, mastery works |
-| 11 | HUD, panels, tooltips | in progress | |
-| 12 | Audio | pending | |
+| 11 | HUD, panels, tooltips | done | equip deltas exact, 0 grid overlaps, gating and vendor correct |
+| 12 | Audio | in progress | |
 | 13 | Assembly, quests, bosses, save | pending | |
 | 14 | Packaging and README | pending | |
 

@@ -1,0 +1,286 @@
+// The permanent bar: life and mana globes, the belt, the two bound skills, and
+// the experience strip. Also the labels that float over items on the ground.
+
+import { Buf, capsule, ellipse, ellipseF, polyF, lineP, outline, bufToCanvas } from '../art/pixel.js';
+import { ramp, packHex } from '../art/palette.js';
+import { SKILL_BY_ID, skillLevel, manaCost } from '../game/skills.js';
+import { RARITY_COLOUR } from '../items/item.js';
+import { xpForLevel } from '../game/combat.js';
+
+export const HUD_H = 92;          // logical pixels
+const GLOBE_R = 42;
+
+const TREE_COLOUR = { fire: '#ff7a30', cold: '#7ad0ff', light: '#b0c8ff' };
+const skillIcons = new Map();
+
+// A small glyph per skill: element-shaped, varied by index so two fire skills
+// are still distinguishable at a glance.
+function bakeSkillIcon(id) {
+  const sk = SKILL_BY_ID[id];
+  const S = 30;
+  const buf = new Buf(S, S);
+  const base = sk.tree ? TREE_COLOUR[sk.tree] : '#c8a03a';
+  const rm = ramp(base);
+  const idx = SKILL_BY_ID[id].iconSeed ?? Object.keys(SKILL_BY_ID).indexOf(id);
+
+  if (sk.tree === 'fire') {
+    polyF(buf, [15, 3, 22, 14, 19, 26, 11, 26, 8, 14], packHex(base));
+    ellipse(buf, 15, 19, 5, 6, ramp('#ffd060'));
+  } else if (sk.tree === 'cold') {
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI;
+      capsule(buf, 15 - Math.cos(a) * 11, 15 - Math.sin(a) * 11, 1.6,
+        15 + Math.cos(a) * 11, 15 + Math.sin(a) * 11, 1.6, rm);
+    }
+    ellipse(buf, 15, 15, 4, 4, ramp('#e8f8ff'));
+  } else {
+    polyF(buf, [17, 2, 10, 14, 15, 14, 12, 28, 21, 12, 15, 12], packHex(base));
+  }
+
+  // Rank pips so skills within a tree read apart.
+  const pips = (idx % 4) + 1;
+  for (let i = 0; i < pips; i++) {
+    ellipseF(buf, 4 + i * 5, 27, 1.6, 1.6, packHex('#f0e0a0'));
+  }
+  if (sk.passive) lineP(buf, 2, 2, 27, 2, packHex('#f0e0a0'));
+
+  outline(buf, packHex('#0c0a10'));
+  return bufToCanvas(buf);
+}
+
+export function skillIcon(id) {
+  let ic = skillIcons.get(id);
+  if (!ic) { ic = bakeSkillIcon(id); skillIcons.set(id, ic); }
+  return ic;
+}
+
+// ------------------------------------------------------------------- globes
+
+function drawGlobe(ctx, cx, cy, r, frac, colours, label) {
+  ctx.save();
+  // Glass ball
+  const g = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.1, cx, cy, r);
+  g.addColorStop(0, colours.hi);
+  g.addColorStop(0.55, colours.mid);
+  g.addColorStop(1, colours.lo);
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#0b0910';
+  ctx.fill();
+
+  // Liquid, clipped to the ball, with a wavy surface.
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r - 2, 0, Math.PI * 2);
+  ctx.clip();
+  const top = cy + r - (r * 2 - 4) * Math.max(0, Math.min(1, frac));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(cx - r, top);
+  for (let x = -r; x <= r; x += 4) {
+    ctx.lineTo(cx + x, top + Math.sin((x + performance.now() * 0.003) * 0.25) * 1.6);
+  }
+  ctx.lineTo(cx + r, cy + r);
+  ctx.lineTo(cx - r, cy + r);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // Rim and highlight
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.strokeStyle = '#4a4030';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  const hl = ctx.createRadialGradient(cx - r * 0.4, cy - r * 0.45, 0, cx - r * 0.4, cy - r * 0.45, r * 0.7);
+  hl.addColorStop(0, 'rgba(255,255,255,0.28)');
+  hl.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = hl;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r - 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#e8dcbc';
+  ctx.font = `${Math.round(r * 0.3)}px Georgia, serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText(label, cx, cy + r * 0.12);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+const LIFE_COLOURS = { hi: '#ff6a5a', mid: '#c02020', lo: '#6a0f10' };
+const MANA_COLOURS = { hi: '#7a9aff', mid: '#2038c0', lo: '#101a5a' };
+
+// --------------------------------------------------------------------- bar
+
+// Returns the clickable regions so input can be tested against them.
+export function drawHUD(ctx, player, opts) {
+  const s = opts.scale;
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  const barH = HUD_H * s;
+  const y = H - barH;
+  const regions = { belt: [], skills: [], globes: {} };
+
+  // Panel
+  ctx.save();
+  ctx.fillStyle = 'rgba(14,12,18,0.92)';
+  ctx.fillRect(0, y, W, barH);
+  ctx.strokeStyle = 'rgba(120,100,60,0.55)';
+  ctx.lineWidth = 2 * s;
+  ctx.beginPath(); ctx.moveTo(0, y + 1); ctx.lineTo(W, y + 1); ctx.stroke();
+
+  // Experience strip along the very bottom.
+  const into = player.xp - xpForLevel(player.level);
+  const need = Math.max(1, xpForLevel(player.level + 1) - xpForLevel(player.level));
+  const frac = Math.max(0, Math.min(1, into / need));
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, H - 5 * s, W, 5 * s);
+  ctx.fillStyle = '#b08a2a';
+  ctx.fillRect(0, H - 5 * s, W * frac, 5 * s);
+
+  const gr = GLOBE_R * s;
+  const gy = y + barH / 2;
+  drawGlobe(ctx, gr + 8 * s, gy, gr, player.hp / player.maxHp, LIFE_COLOURS,
+    `${Math.round(player.hp)}/${player.maxHp}`);
+  drawGlobe(ctx, W - gr - 8 * s, gy, gr, player.mana / player.maxMana, MANA_COLOURS,
+    `${Math.round(player.mana)}/${player.maxMana}`);
+  regions.globes.life = { x: 8 * s, y: gy - gr, w: gr * 2, h: gr * 2 };
+  regions.globes.mana = { x: W - gr * 2 - 8 * s, y: gy - gr, w: gr * 2, h: gr * 2 };
+
+  // Belt: four potion slots on keys 1 to 4.
+  const slot = 40 * s;
+  const beltW = slot * 4 + 6 * s * 3;
+  const bx = W / 2 - beltW / 2;
+  const by = y + barH / 2 - slot / 2;
+  for (let i = 0; i < 4; i++) {
+    const x = bx + i * (slot + 6 * s);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x, by, slot, slot);
+    ctx.strokeStyle = 'rgba(140,120,70,0.6)';
+    ctx.lineWidth = 1.5 * s;
+    ctx.strokeRect(x + 0.5, by + 0.5, slot - 1, slot - 1);
+    const p = player.belt[i];
+    if (p && opts.iconFor) {
+      const ic = opts.iconFor(p);
+      ctx.drawImage(ic, x + (slot - ic.width * s) / 2, by + (slot - ic.height * s) / 2, ic.width * s, ic.height * s);
+    }
+    ctx.fillStyle = '#9a8f70';
+    ctx.font = `${Math.round(11 * s)}px Georgia, serif`;
+    ctx.fillText(String(i + 1), x + 3 * s, by + 12 * s);
+    regions.belt.push({ x, y: by, w: slot, h: slot, index: i });
+  }
+
+  // The two bound skills, left of the belt and right of it.
+  const drawSkillButton = (id, x, isLeft) => {
+    const sz = 46 * s;
+    const yy = y + barH / 2 - sz / 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x, yy, sz, sz);
+    ctx.strokeStyle = 'rgba(150,130,80,0.7)';
+    ctx.lineWidth = 2 * s;
+    ctx.strokeRect(x + 0.5, yy + 0.5, sz - 1, sz - 1);
+    if (id && id !== 'attack') {
+      const ic = skillIcon(id);
+      ctx.drawImage(ic, x + (sz - ic.width * s) / 2, yy + (sz - ic.height * s) / 2, ic.width * s, ic.height * s);
+      const cost = manaCost(player, id);
+      if (cost) {
+        ctx.fillStyle = player.mana >= cost ? '#8fa8ff' : '#ff5a4a';
+        ctx.font = `${Math.round(10 * s)}px Georgia, serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(String(cost), x + sz / 2, yy + sz - 3 * s);
+        ctx.textAlign = 'left';
+      }
+    } else {
+      ctx.fillStyle = '#8a7f6a';
+      ctx.font = `${Math.round(11 * s)}px Georgia, serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('Attack', x + sz / 2, yy + sz / 2 + 4 * s);
+      ctx.textAlign = 'left';
+    }
+    ctx.fillStyle = '#7f7663';
+    ctx.font = `${Math.round(10 * s)}px Georgia, serif`;
+    ctx.fillText(isLeft ? 'L' : 'R', x + 3 * s, yy + 11 * s);
+    regions.skills.push({ x, y: yy, w: sz, h: sz, side: isLeft ? 'left' : 'right' });
+  };
+  drawSkillButton(player.leftSkill, bx - 56 * s, true);
+  drawSkillButton(player.rightSkill, bx + beltW + 10 * s, false);
+
+  ctx.restore();
+  return regions;
+}
+
+// ------------------------------------------------------- world-space labels
+
+// Item names on the ground. Alt shows every one; otherwise only what is close
+// or under the cursor.
+export function drawGroundLabels(ctx, level, cam, opts) {
+  const s = opts.scale;
+  const showAll = opts.showAll;
+  const player = opts.player;
+  ctx.save();
+  ctx.font = `${Math.round(12 * s)}px Georgia, serif`;
+  ctx.textAlign = 'center';
+  const placed = [];
+  for (const gi of level.items) {
+    if (gi.taken) continue;
+    const d = Math.hypot(gi.x - player.x, gi.y - player.y);
+    const near = d < 5.5;
+    const hovered = opts.hovered === gi;
+    if (!showAll && !hovered && !near) continue;
+
+    const p = cam.toScreen(gi.x, gi.y);
+    let ly = p.y - 26 * s;
+    // Nudge overlapping labels apart so a pile stays readable.
+    for (const q of placed) {
+      if (Math.abs(q.x - p.x) < 70 * s && Math.abs(q.y - ly) < 14 * s) ly = q.y - 15 * s;
+    }
+    placed.push({ x: p.x, y: ly });
+
+    const name = gi.item.gold ? `${gi.item.gold} Gold` : gi.item.name;
+    const w = ctx.measureText(name).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.66)';
+    ctx.fillRect(p.x - w / 2 - 5 * s, ly - 11 * s, w + 10 * s, 15 * s);
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(p.x - w / 2 - 5 * s, ly - 11 * s, w + 10 * s, 15 * s);
+    ctx.fillStyle = RARITY_COLOUR[gi.item.rarity] || '#d6cdb4';
+    ctx.fillText(name, p.x, ly);
+    gi.labelRect = { x: p.x - w / 2 - 5 * s, y: ly - 11 * s, w: w + 10 * s, h: 15 * s };
+  }
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+// Name and health above whatever the cursor is over.
+export function drawMonsterBanner(ctx, m, cam, s) {
+  if (!m) return;
+  const p = cam.toScreen(m.x, m.y);
+  const label = m.label || m.name;
+  ctx.save();
+  ctx.font = `${Math.round(14 * s)}px Georgia, serif`;
+  ctx.textAlign = 'center';
+  const w = Math.max(90 * s, ctx.measureText(label).width + 20 * s);
+  const y = p.y - 74 * s;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(p.x - w / 2, y - 14 * s, w, 26 * s);
+  ctx.fillStyle = m.rank === 'boss' || m.rank === 'unique' ? '#ffb020' : m.rank === 'champion' ? '#7ab0ff' : '#d0c8b0';
+  ctx.fillText(label, p.x, y - 2 * s);
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(p.x - w / 2 + 6 * s, y + 4 * s, w - 12 * s, 5 * s);
+  ctx.fillStyle = '#b03030';
+  ctx.fillRect(p.x - w / 2 + 6 * s, y + 4 * s, (w - 12 * s) * Math.max(0, m.hp / m.maxHp), 5 * s);
+  if (m.mods && m.mods.length) {
+    ctx.font = `${Math.round(11 * s)}px Georgia, serif`;
+    ctx.fillStyle = '#9a8fd0';
+    ctx.fillText(m.mods.join(', '), p.x, y + 22 * s);
+  }
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+export { skillLevel };
