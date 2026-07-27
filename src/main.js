@@ -22,6 +22,7 @@ import { Projectiles } from './game/projectile.js';
 import { SKILLS, SKILL_BY_ID, castSkill, allocate, refreshPassives, skillLevel } from './game/skills.js';
 import { UI } from './ui/panels.js';
 import { drawHUD, drawGroundLabels, drawMonsterBanner, HUD_H } from './ui/hud.js';
+import * as audio from './audio/synth.js';
 
 const canvas = document.getElementById('game');
 const ctx2d = canvas.getContext('2d');
@@ -83,6 +84,7 @@ function killMonster(m) {
   const pen = xpPenalty(player.level, m.mlvl);
   player.gainXp(Math.round(m.xpValue * pen), (lvl) => {
     FX.levelUp(fx, player.x, player.y);
+    audio.sfx('levelUp');
     ui.say(`Welcome to level ${lvl}`);
   });
   FX.death(fx, m.x, m.y);
@@ -94,7 +96,7 @@ const gctx = {
   get player() { return player; },
   fx, rng, projectiles, dt: 1 / 60,
   get time() { return clock; },
-  sfx: null,
+  sfx: (name, opts) => audio.sfx(name, opts),
   get canvasSize() { return { w: canvas.width, h: canvas.height }; },
   get scale() { return uiScale; },
 
@@ -106,9 +108,9 @@ const gctx = {
     const dealt = before - m.hp;
     if (dealt > 0) {
       fx.float(m.x, m.y, String(Math.round(dealt)), 'rgba(255,240,200,1)');
-      if (opts.absolute === undefined) FX.hitSpark(fx, m.x, m.y);
+      if (opts.absolute === undefined) { FX.hitSpark(fx, m.x, m.y); audio.sfx('hit'); }
     }
-    if (!m.alive) killMonster(m);
+    if (!m.alive) { audio.sfx('death'); killMonster(m); }
     return dealt;
   },
 
@@ -169,12 +171,14 @@ function hurtPlayer(dmg, source) {
   if (dealt > 0) {
     fx.float(player.x, player.y, `-${Math.round(dealt)}`, 'rgba(255,90,80,1)');
     cam.addShake(2.2);
+    audio.sfx('hurt');
   }
 }
 
 function playerAttack(target) {
   player.busy = 0.42 / player.attackSpeed;
   player.face(target.x, target.y);
+  audio.sfx('swing');
   player.setAnim('attack', {
     loop: false, force: true, hitFrame: 3,
     onHitFrame: () => {
@@ -207,6 +211,7 @@ function drinkBelt(i) {
   if (p.potion === 'life') { player.heal(p.amount); fx.float(player.x, player.y, `+${p.amount}`, 'rgba(255,120,110,1)'); }
   else { player.restoreMana(p.amount); fx.float(player.x, player.y, `+${p.amount}`, 'rgba(120,140,255,1)'); }
   player.belt[i] = null;
+  audio.sfx('potion');
   return true;
 }
 
@@ -266,7 +271,9 @@ function step(dt) {
       const m = entityUnderCursor();
       if (gi) {
         if (Math.hypot(gi.x - player.x, gi.y - player.y) < 1.6) {
-          if (!pickUp(player, gi)) ui.say('No room for that');
+          const got = pickUp(player, gi);
+          if (!got) ui.say('No room for that');
+          else audio.sfx(gi.item.gold ? 'gold' : 'pickup');
         } else player.moveTo(level, gi.x, gi.y);
       } else if (m) {
         player.target = m;
@@ -319,7 +326,7 @@ function step(dt) {
 
   for (const gi of level.items) {
     if (gi.taken || !gi.item.gold) continue;
-    if (Math.hypot(gi.x - player.x, gi.y - player.y) < 1.1) pickUp(player, gi);
+    if (Math.hypot(gi.x - player.x, gi.y - player.y) < 1.1 && pickUp(player, gi)) audio.sfx('gold');
   }
 
   fx.update(dt);
@@ -463,6 +470,37 @@ window.__uiChecks = () => {
 
   void describe;
   return out;
+};
+
+// Autoplay policy blocks audio until the user has interacted, so the context is
+// created and resumed on the first gesture rather than at load.
+for (const ev of ['pointerdown', 'keydown']) {
+  window.addEventListener(ev, () => { audio.unlock(); if (level) audio.ambient(level); }, { once: true });
+}
+
+// Render every effect into an OfflineAudioContext and measure it. Sound cannot
+// be heard under automation, but silence can be detected.
+window.__audioCheck = async () => {
+  const out = [];
+  for (const name of audio.EFFECT_NAMES) {
+    const off = new OfflineAudioContext(1, 44100 * 1.6, 44100);
+    audio.init(off);
+    const fired = audio.sfx(name, { big: true });
+    const buf = await off.startRendering();
+    const d = buf.getChannelData(0);
+    let sum = 0, peak = 0;
+    for (let i = 0; i < d.length; i++) { sum += d[i] * d[i]; peak = Math.max(peak, Math.abs(d[i])); }
+    out.push({ name, fired, rms: +Math.sqrt(sum / d.length).toFixed(5), peak: +peak.toFixed(4) });
+  }
+  audio.init(null);
+  return {
+    effects: out.length,
+    silent: out.filter((o) => o.peak < 1e-4).map((o) => o.name),
+    clipping: out.filter((o) => o.peak > 1.0).map((o) => o.name),
+    quietest: out.reduce((a, b) => (a.peak < b.peak ? a : b)),
+    loudest: out.reduce((a, b) => (a.peak > b.peak ? a : b)),
+    all: out,
+  };
 };
 
 window.__setArea = (i) => { areaIdx = i; build(); return level.name; };

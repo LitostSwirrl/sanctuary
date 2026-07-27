@@ -24,8 +24,8 @@ every sprite, tile, item icon and sound effect is computed at load time.
 | 9 | Monsters and AI | done | wake, separation, hit-frame, flee, resurrect, loot all verified |
 | 10 | Skills and projectiles | done | 14 skills; mana exact, teleport 200/200 safe, mastery works |
 | 11 | HUD, panels, tooltips | done | equip deltas exact, 0 grid overlaps, gating and vendor correct |
-| 12 | Audio | in progress | |
-| 13 | Assembly, quests, bosses, save | pending | |
+| 12 | Audio | done | 21 effects render non-silent offline, none clip, throttle works |
+| 13 | Assembly, quests, bosses, save | in progress | |
 | 14 | Packaging and README | pending | |
 
 ## What works right now
