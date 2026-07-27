@@ -1,28 +1,35 @@
-// Phase 11 harness: the slice with its full interface. Area transitions,
-// quests, death and save/load arrive in the next task.
+// Sanctuary — a small Diablo 2 in the browser.
+//
+// This file is the state machine and the wiring: it owns the loading screen,
+// the title, the six areas and the transitions between them, the quest flags,
+// death and resurrection, and save. Everything it wires together lives in its
+// own module and does not know about this one.
 
 import { startLoop } from './core/loop.js';
 import { Camera } from './core/iso.js';
 import { Input } from './core/input.js';
-import { Rng } from './core/rng.js';
-import { bakeTiles } from './art/tiles.js';
+import { Rng, hashSeed } from './core/rng.js';
+import { bakeTiles, getProp } from './art/tiles.js';
 import { bakeAllFigures } from './art/figures.js';
 import { Particles, FX } from './art/fx.js';
-import { iconFor } from './art/icons.js';
-import { AREAS } from './world/levels.js';
+import { iconFor, bakeIcons } from './art/icons.js';
+import { AREAS, AREA_BY_ID, WAYPOINT_AREAS } from './world/levels.js';
 import { generate } from './world/gen.js';
 import { Renderer } from './render/renderer.js';
 import { drawMinimap } from './render/minimap.js';
 import { Player } from './game/player.js';
-import { applyDamage, applyChill, rollHit, rollDamage, tickBurn, xpPenalty } from './game/combat.js';
+import { applyDamage, applyChill, rollHit, rollDamage, tickBurn, xpPenalty, xpForLevel } from './game/combat.js';
 import { populate, spawnBoss, Monster } from './game/monster.js';
 import { updateAI } from './game/ai.js';
-import { dropLoot, pickUp, addToInventory, removeFromInventory, sellValue } from './game/loot.js';
+import { dropLoot, dropFromContainer, pickUp, addToInventory, groundItem } from './game/loot.js';
 import { Projectiles } from './game/projectile.js';
-import { SKILLS, SKILL_BY_ID, castSkill, allocate, refreshPassives, skillLevel } from './game/skills.js';
+import { castSkill, allocate, refreshPassives } from './game/skills.js';
+import { makeGold } from './items/item.js';
 import { UI } from './ui/panels.js';
 import { drawHUD, drawGroundLabels, drawMonsterBanner, HUD_H } from './ui/hud.js';
+import { panel, panelTitle } from './ui/tooltip.js';
 import * as audio from './audio/synth.js';
+import { save, load, hasSave, clear as clearSave, applyTo } from './save.js';
 
 const canvas = document.getElementById('game');
 const ctx2d = canvas.getContext('2d');
@@ -30,6 +37,7 @@ const cam = new Camera();
 const renderer = new Renderer(canvas);
 const ui = new UI();
 Input.attach(canvas);
+document.getElementById('hint').style.display = 'none';
 
 let uiScale = 1;
 function resize() {
@@ -44,41 +52,146 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
+// ------------------------------------------------------------------ loading
+
 const assets = { figures: {} };
-let ready = false;
-function* allBakers() { yield* bakeTiles(); yield* bakeAllFigures(assets.figures); }
+let state = 'loading';
+let loadPct = 0, loadLabel = '';
+const TOTAL_BAKE_STEPS = 7 + 7 + 12 + 11 + 43;
+let bakeSteps = 0;
+function* allBakers() { yield* bakeTiles(); yield* bakeAllFigures(assets.figures); yield* bakeIcons(); }
 const baker = allBakers();
-window.__forceLoad = () => { while (!ready) if (baker.next().done) { ready = true; build(); } return true; };
 
-let level = null, player = null, clock = 0, areaIdx = 2;
-const fx = new Particles();
-const projectiles = new Projectiles();
-const rng = new Rng(20260728);
-
-function build() {
-  const def = AREAS[areaIdx];
-  level = generate(def, 20260728 + areaIdx * 7919);
-  player = new Player({ x: level.start.x, y: level.start.y, sheet: assets.figures.sorceress });
-  player.level = 12;
-  player.statPoints = 20;
-  player.skillPoints = 14;
-  allocate(player, 'firebolt'); allocate(player, 'warmth'); allocate(player, 'fireball');
-  allocate(player, 'icebolt'); allocate(player, 'chargedbolt'); allocate(player, 'staticfield');
-  allocate(player, 'teleport');
-  player.rightSkill = 'fireball';
-  refreshPassives(player);
-  player.gold = 2500;
-  player.recalc(true);
-  for (let i = 0; i < 4; i++) player.belt[i] = null;
-  populate(level, def, rng, assets.figures);
-  if (def.boss) spawnBoss(level, def.boss, rng, assets.figures);
-  cam.x = player.x; cam.y = player.y;
-  level.markExplored(player.x, player.y, 14);
-  fx.clear(); projectiles.clear();
-  ui.vendorStock = null;
+function pumpLoading() {
+  const until = performance.now() + 12;
+  while (performance.now() < until) {
+    const r = baker.next();
+    if (r.done) { state = 'title'; return; }
+    bakeSteps++;
+    loadLabel = r.value.label || '';
+    loadPct = Math.min(1, bakeSteps / TOTAL_BAKE_STEPS);
+  }
 }
 
-// ---------------------------------------------------------------- game ctx
+// --------------------------------------------------------------------- game
+
+const fx = new Particles();
+const projectiles = new Projectiles();
+let rng = new Rng(1);
+let player = null;
+let level = null;
+let clock = 0;
+let seed = 1;
+let areaId = 'town';
+const levels = new Map();
+let corpse = null;
+let transitionCool = 0;
+// You arrive standing on the door you came through. Until you step off it, that
+// door is inert — otherwise the moment the arrival grace period lapses you are
+// sent straight back where you came from.
+let suppressedExit = null;
+let deathScreenT = 0;
+
+const game = {
+  get player() { return player; },
+  get seed() { return seed; },
+  get areaId() { return areaId; },
+  get corpse() { return corpse; },
+  get now() { return Date.now(); },
+};
+
+function newGame() {
+  seed = (Math.floor(Math.random() * 0x7fffffff)) >>> 0;
+  rng = new Rng(seed);
+  levels.clear();
+  corpse = null;
+  player = new Player({ x: 0, y: 0, sheet: assets.figures.sorceress });
+  allocate(player, 'firebolt');
+  player.rightSkill = 'firebolt';
+  player.leftSkill = 'attack';
+  player.gold = 80;
+  refreshPassives(player);
+  player.recalc(true);
+  enterArea('town', null, true);
+  state = 'playing';
+  save(game);
+}
+
+function continueGame() {
+  const d = load();
+  if (!d) { newGame(); return; }
+  seed = d.seed;
+  rng = new Rng(seed);
+  levels.clear();
+  player = new Player({ x: 0, y: 0, sheet: assets.figures.sorceress });
+  let uid = 100000;
+  applyTo(player, d, () => uid++);
+  refreshPassives(player);
+  corpse = d.corpse || null;
+  enterArea(d.area || 'town', null, true);
+  if (d.at) { player.x = d.at.x; player.y = d.at.y; }
+  cam.x = player.x; cam.y = player.y;
+  state = 'playing';
+}
+
+// Levels are kept for the session so walking back does not reshuffle the map or
+// revive what you already killed. A reload regenerates them from the seed.
+function getLevel(id) {
+  if (levels.has(id)) return levels.get(id);
+  const def = AREA_BY_ID[id];
+  const lvRng = new Rng(hashSeed(`${seed}:${id}`));
+  const lv = generate(def, hashSeed(`${seed}:${id}`));
+  if (def.monsters && def.monsters.length) populate(lv, def, lvRng, assets.figures);
+  if (def.boss && !player.quests[def.quest]) spawnBoss(lv, def.boss, lvRng, assets.figures);
+  levels.set(id, lv);
+  return lv;
+}
+
+function enterArea(id, fromId, snapCamera) {
+  areaId = id;
+  level = getLevel(id);
+  projectiles.clear();
+  fx.clear();
+
+  // Arrive at the door you came through, not at the area's default entrance.
+  let at = level.start;
+  suppressedExit = null;
+  if (fromId) {
+    const back = level.exits.find((e) => e.to === fromId);
+    if (back) { at = level.nearestOpen(back.x, back.y, 6); suppressedExit = back; }
+  } else {
+    // An area's default start sits on its own entry exit, so suppress whichever
+    // door we happen to be standing on.
+    suppressedExit = level.exits.find((e) => Math.hypot(e.x - at.x, e.y - at.y) < 2) || null;
+  }
+  player.x = at.x; player.y = at.y;
+  player.stop();
+  player.target = null;
+  level.markExplored(player.x, player.y, 12);
+  if (snapCamera) { cam.x = player.x; cam.y = player.y; }
+  transitionCool = 0.6;
+  audio.ambient(level);
+  ui.say(level.name, 2.4);
+  save(game);
+}
+
+function travelTo(id) {
+  if (!player.waypoints[id]) return;
+  ui.closeAll();
+  enterArea(id, null, true);
+  audio.sfx('portal');
+}
+
+// ------------------------------------------------------------------ combat
+
+function grantQuest(name, message, reward) {
+  if (player.quests[name]) return;
+  player.quests[name] = true;
+  reward();
+  ui.say(message, 4);
+  audio.sfx('quest');
+  save(game);
+}
 
 function killMonster(m) {
   const pen = xpPenalty(player.level, m.mlvl);
@@ -86,9 +199,25 @@ function killMonster(m) {
     FX.levelUp(fx, player.x, player.y);
     audio.sfx('levelUp');
     ui.say(`Welcome to level ${lvl}`);
+    save(game);
   });
   FX.death(fx, m.x, m.y);
   dropLoot(level, m, player, rng);
+
+  if (m.rank === 'boss') {
+    cam.addShake(9);
+    if (m.defId === 'corpsefire') {
+      grantQuest('den', 'The Den of Evil is cleared. The Rogues grant you a skill point.',
+        () => { player.skillPoints += 1; });
+    } else if (m.defId === 'bloodraven') {
+      grantQuest('raven', 'Blood Raven is put to rest. You feel steadier.',
+        () => { player.statPoints += 5; });
+    } else if (m.defId === 'andariel') {
+      grantQuest('andariel', 'Andariel is dead. The way beneath the monastery is clear.',
+        () => { player.statPoints += 5; player.skillPoints += 2; });
+      state = 'won';
+    }
+  }
 }
 
 const gctx = {
@@ -109,6 +238,11 @@ const gctx = {
     if (dealt > 0) {
       fx.float(m.x, m.y, String(Math.round(dealt)), 'rgba(255,240,200,1)');
       if (opts.absolute === undefined) { FX.hitSpark(fx, m.x, m.y); audio.sfx('hit'); }
+      // Life and mana steal, which is why those affixes matter on a caster.
+      if (opts.source === player) {
+        if (player.totals.lifeSteal) player.heal(dealt * player.totals.lifeSteal / 100);
+        if (player.totals.manaSteal) player.restoreMana(dealt * player.totals.manaSteal / 100);
+      }
     }
     if (!m.alive) { audio.sfx('death'); killMonster(m); }
     return dealt;
@@ -144,13 +278,13 @@ const gctx = {
     hurtPlayer(dmg, m);
   },
 
-  resurrect(shaman, corpse) {
-    corpse.resurrected = true;
-    const m = new Monster(corpse.defId, corpse.mlvl, { x: corpse.x, y: corpse.y, rng, sheet: corpse.sheet });
+  resurrect(shaman, body) {
+    body.resurrected = true;
+    const m = new Monster(body.defId, body.mlvl, { x: body.x, y: body.y, rng, sheet: body.sheet });
     m.state = 'chase';
     level.addEntity(m);
-    corpse.remove = true;
-    fx.burst('ember', corpse.x, corpse.y, 18, { z: 8, spread: 2.4, r: 255, g: 180, b: 60 });
+    body.remove = true;
+    fx.burst('ember', body.x, body.y, 18, { z: 8, spread: 2.4, r: 255, g: 180, b: 60 });
     return m;
   },
 
@@ -165,6 +299,7 @@ const gctx = {
 };
 
 function hurtPlayer(dmg, source) {
+  if (!player.alive) return;
   const before = player.hp;
   applyDamage(player, dmg, { source });
   const dealt = before - player.hp;
@@ -173,7 +308,39 @@ function hurtPlayer(dmg, source) {
     cam.addShake(2.2);
     audio.sfx('hurt');
   }
+  if (player.hp <= 0 && state === 'playing') die();
 }
+
+function die() {
+  player.hp = 0;
+  player.alive = false;
+  player.setAnim('death', { loop: false, force: true });
+  state = 'dead';
+  deathScreenT = 0;
+  audio.sfx('bossRoar');
+  // The gold you were carrying stays where you fell, as a corpse to go and get.
+  if (player.gold > 0) {
+    corpse = { area: areaId, x: player.x, y: player.y, gold: player.gold };
+    player.gold = 0;
+  }
+  // Experience earned toward the current level is lost, never a whole level.
+  const floor = xpForLevel(player.level);
+  player.xp = Math.max(floor, Math.round(floor + (player.xp - floor) * 0.75));
+  save(game);
+}
+
+function resurrect() {
+  player.alive = true;
+  player.remove = false;
+  player.hp = player.maxHp;
+  player.mana = player.maxMana;
+  player.setAnim('idle', { force: true });
+  state = 'playing';
+  enterArea('town', null, true);
+  ui.say('You wake in the encampment. Your gold lies where you fell.', 4);
+}
+
+// ------------------------------------------------------------------- action
 
 function playerAttack(target) {
   player.busy = 0.42 / player.attackSpeed;
@@ -182,7 +349,7 @@ function playerAttack(target) {
   player.setAnim('attack', {
     loop: false, force: true, hitFrame: 3,
     onHitFrame: () => {
-      if (!target.alive || player.distTo(target) > 1.6) return;
+      if (!target.alive || player.distTo(target) > 1.7) return;
       if (!rollHit(rng, player.attackRating, target.defense, player.level, target.mlvl)) {
         fx.float(target.x, target.y, 'miss', 'rgba(190,190,190,1)');
         return;
@@ -197,10 +364,11 @@ function playerAttack(target) {
 function doCast(id, tx, ty) {
   if (!id || id === 'attack') return false;
   const r = castSkill(player, id, tx, ty, gctx);
-  if (r === 'mana') { ui.say('Not enough mana'); return false; }
+  if (r === 'mana') { ui.say('Not enough mana'); audio.sfx('error'); return false; }
   if (r !== 'ok') return false;
   player.busy = 0.4 / (1 + player.castRate / 100);
   player.face(tx, ty);
+  audio.sfx('cast');
   player.setAnim('cast', { loop: false, force: true, onEnd: () => player.setAnim('idle') });
   return true;
 }
@@ -217,7 +385,7 @@ function drinkBelt(i) {
 
 function entityUnderCursor() {
   const w = cam.toWorld(Input.mouse.x, Input.mouse.y);
-  let best = null, bd = 1.1;
+  let best = null, bd = 1.15;
   for (const e of level.entities) {
     if (!e.alive || e.isPlayer) continue;
     const d = Math.hypot(e.x - w.x, e.y - w.y);
@@ -237,27 +405,87 @@ function groundItemUnderCursor() {
   const w = cam.toWorld(mx, my);
   for (const gi of level.items) {
     if (gi.taken) continue;
-    if (Math.hypot(gi.x - w.x, gi.y - w.y) < 0.55) return gi;
+    if (Math.hypot(gi.x - w.x, gi.y - w.y) < 0.6) return gi;
   }
   return null;
 }
 
+function propUnderCursor() {
+  const w = cam.toWorld(Input.mouse.x, Input.mouse.y);
+  for (const p of level.props) {
+    if (p.opened) continue;
+    if (p.name !== 'chest' && p.name !== 'barrel') continue;
+    if (Math.hypot(p.x - w.x, p.y - w.y) < 0.85) return p;
+  }
+  return null;
+}
+
+function openContainer(p) {
+  p.opened = true;
+  audio.sfx('chest');
+  fx.burst('dust', p.x, p.y, 12, { z: 8, spread: 1.6, r: 120, g: 105, b: 80 });
+  dropFromContainer(level, p.x, p.y, level.areaLevel + 1, player, rng);
+}
+
 // ------------------------------------------------------------------- update
 
+function checkTransitions(dt) {
+  transitionCool -= dt;
+  if (transitionCool > 0) return;
+
+  if (suppressedExit && Math.hypot(suppressedExit.x - player.x, suppressedExit.y - player.y) > 2.4) {
+    suppressedExit = null;
+  }
+  for (const e of level.exits) {
+    if (e === suppressedExit) continue;
+    if (Math.hypot(e.x - player.x, e.y - player.y) < 1.15) {
+      audio.sfx('portal');
+      enterArea(e.to, areaId, false);
+      return;
+    }
+  }
+  if (level.waypoint) {
+    const d = Math.hypot(level.waypoint.x - player.x, level.waypoint.y - player.y);
+    if (d < 2.2 && !player.waypoints[areaId]) {
+      player.waypoints[areaId] = true;
+      ui.say(`${level.name} waypoint found`, 3);
+      audio.sfx('waypoint');
+      save(game);
+    }
+  }
+  if (corpse && corpse.area === areaId && Math.hypot(corpse.x - player.x, corpse.y - player.y) < 1.4) {
+    player.gold += corpse.gold;
+    ui.say(`Recovered ${corpse.gold} gold`, 2.5);
+    audio.sfx('gold');
+    corpse = null;
+    save(game);
+  }
+}
+
 function step(dt) {
-  if (!ready) return;
   clock += dt;
   gctx.dt = dt;
   ui.update(dt);
 
+  if (state === 'dead') {
+    deathScreenT += dt;
+    player.updateAnim(dt);
+    for (const e of level.entities) if (!e.isPlayer) updateAI(e, dt, gctx);
+    fx.update(dt);
+    if (Input.consume('Enter') || Input.consume('Space') || (deathScreenT > 1.2 && Input.consumeL())) resurrect();
+    Input.endFrame();
+    return;
+  }
+
+  if (state !== 'playing' && state !== 'won') { Input.endFrame(); return; }
+
   if (Input.consume('KeyI')) ui.toggle('inventory');
   if (Input.consume('KeyC')) ui.toggle('character');
   if (Input.consume('KeyT')) ui.toggle('skills');
-  if (Input.consume('KeyV')) { ui.toggle('vendor'); if (ui.open === 'vendor') ui.ensureStock(rng, level.areaLevel); }
   if (Input.consume('Space')) ui.closeAll();
   if (Input.consume('Escape')) ui.closeAll();
   if (Input.consume('Tab')) ui.mapMode = !ui.mapMode;
-  if (Input.consume('BracketRight')) { areaIdx = (areaIdx + 1) % AREAS.length; build(); return; }
+  if (Input.consume('KeyM')) { audio.setMuted(!audio.isMuted()); ui.say(audio.isMuted() ? 'Sound off' : 'Sound on'); }
   for (let i = 0; i < 4; i++) if (Input.consume('Digit' + (i + 1))) drinkBelt(i);
 
   const mx = Input.mouse.x, my = Input.mouse.y;
@@ -265,51 +493,65 @@ function step(dt) {
   const overPanel = ui.pointerOverPanel(mx, my, gctx);
 
   if (Input.consumeL()) {
-    if (ui.mouseDown(mx, my, player, gctx, 0)) { /* consumed by a panel */ }
-    else if (!overHud) {
+    if (!ui.mouseDown(mx, my, player, gctx, 0) && !overHud) {
       const gi = groundItemUnderCursor();
+      const prop = propUnderCursor();
       const m = entityUnderCursor();
-      if (gi) {
-        if (Math.hypot(gi.x - player.x, gi.y - player.y) < 1.6) {
+      const w = cam.toWorld(mx, my);
+      // Talking to the vendor and using the waypoint are both walk-up actions.
+      const vendorNear = level.vendor && Math.hypot(level.vendor.x - w.x, level.vendor.y - w.y) < 1.6;
+      const wpNear = level.waypoint && Math.hypot(level.waypoint.x - w.x, level.waypoint.y - w.y) < 1.6;
+
+      if (vendorNear && Math.hypot(level.vendor.x - player.x, level.vendor.y - player.y) < 3.5) {
+        ui.toggle('vendor'); if (ui.open === 'vendor') ui.ensureStock(rng, level.areaLevel);
+      } else if (wpNear && player.waypoints[areaId]
+                 && Math.hypot(level.waypoint.x - player.x, level.waypoint.y - player.y) < 3.5) {
+        ui.toggle('waypoint');
+      } else if (gi) {
+        if (Math.hypot(gi.x - player.x, gi.y - player.y) < 1.7) {
           const got = pickUp(player, gi);
-          if (!got) ui.say('No room for that');
+          if (!got) { ui.say('No room for that'); audio.sfx('error'); }
           else audio.sfx(gi.item.gold ? 'gold' : 'pickup');
         } else player.moveTo(level, gi.x, gi.y);
+      } else if (prop) {
+        if (Math.hypot(prop.x - player.x, prop.y - player.y) < 2) openContainer(prop);
+        else player.moveTo(level, prop.x, prop.y);
       } else if (m) {
         player.target = m;
-        if (player.distTo(m) <= 1.5) { player.stop(); playerAttack(m); }
+        if (player.distTo(m) <= 1.6) { player.stop(); playerAttack(m); }
         else player.moveTo(level, m.x, m.y);
       } else {
-        const w = cam.toWorld(mx, my);
         player.target = null;
         player.moveTo(level, w.x, w.y);
       }
     }
-  } else if (Input.mouse.downL && !overHud && !overPanel && player.alive && player.busy <= 0 && !ui.drag) {
+  } else if (Input.mouse.downL && !overHud && !overPanel && player.busy <= 0 && !ui.drag && !player.target) {
     const w = cam.toWorld(mx, my);
-    if (!player.target && (!player.moveGoal || Math.hypot(w.x - player.moveGoal.x, w.y - player.moveGoal.y) > 0.8)) {
+    if (!player.moveGoal || Math.hypot(w.x - player.moveGoal.x, w.y - player.moveGoal.y) > 0.8) {
       player.moveTo(level, w.x, w.y);
     }
   }
 
   if (Input.consumeR()) {
-    if (!ui.mouseDown(mx, my, player, gctx, 2) && !overHud && player.alive && player.busy <= 0) {
+    if (!ui.mouseDown(mx, my, player, gctx, 2) && !overHud && player.busy <= 0) {
       const w = cam.toWorld(mx, my);
       doCast(player.rightSkill, w.x, w.y);
     }
-  } else if (Input.mouse.downR && !overPanel && !overHud && player.alive && player.busy <= 0) {
+  } else if (Input.mouse.downR && !overPanel && !overHud && player.busy <= 0) {
     const w = cam.toWorld(mx, my);
     doCast(player.rightSkill, w.x, w.y);
   }
 
   if (Input.mouse.releasedL) ui.mouseUp(mx, my, player, gctx);
 
-  if (player.target && player.alive && player.busy <= 0 && player.target.alive && player.distTo(player.target) <= 1.5) {
+  if (player.target && player.busy <= 0 && player.target.alive && player.distTo(player.target) <= 1.6) {
     player.stop(); playerAttack(player.target);
   }
+  if (player.target && !player.target.alive) player.target = null;
 
   player.update(dt, level);
   tickBurn(player, dt);
+  if (player.hp <= 0 && state === 'playing') die();
 
   for (const e of level.entities) {
     if (e.isPlayer) continue;
@@ -319,16 +561,17 @@ function step(dt) {
       if (!e.alive && before > 0) killMonster(e);
     }
     updateAI(e, dt, gctx);
-    if (!e.alive && e.corpseTimer > 40) e.remove = true;
+    if (!e.alive && e.corpseTimer > 45) e.remove = true;
   }
   level.removeDead();
   projectiles.update(dt, gctx);
 
   for (const gi of level.items) {
     if (gi.taken || !gi.item.gold) continue;
-    if (Math.hypot(gi.x - player.x, gi.y - player.y) < 1.1 && pickUp(player, gi)) audio.sfx('gold');
+    if (Math.hypot(gi.x - player.x, gi.y - player.y) < 1.2 && pickUp(player, gi)) audio.sfx('gold');
   }
 
+  checkTransitions(dt);
   fx.update(dt);
   cam.follow(player, dt);
   cam.updateShake(dt);
@@ -336,18 +579,110 @@ function step(dt) {
   Input.endFrame();
 }
 
+// --------------------------------------------------------------------- draw
+
+function drawTitle() {
+  ctx2d.fillStyle = '#08070b';
+  ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+  const s = uiScale;
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+
+  ctx2d.textAlign = 'center';
+  ctx2d.fillStyle = '#c8a03a';
+  ctx2d.font = `${Math.round(56 * s)}px Georgia, serif`;
+  ctx2d.fillText('SANCTUARY', cx, cy - 90 * s);
+  ctx2d.fillStyle = '#6a6050';
+  ctx2d.font = `${Math.round(15 * s)}px Georgia, serif`;
+  ctx2d.fillText('every pixel and every sound generated at load', cx, cy - 56 * s);
+
+  const options = [{ id: 'new', label: 'New Game' }];
+  if (hasSave()) options.unshift({ id: 'continue', label: 'Continue' });
+  titleAreas = [];
+  options.forEach((o, i) => {
+    const w = 260 * s, h = 44 * s;
+    const x = cx - w / 2, y = cy - 10 * s + i * 56 * s;
+    const hov = Input.mouse.x >= x && Input.mouse.x < x + w && Input.mouse.y >= y && Input.mouse.y < y + h;
+    panel(ctx2d, x, y, w, h, { border: hov ? '#c8a03a' : '#5a4f36' });
+    ctx2d.fillStyle = hov ? '#ffe08a' : '#c8b070';
+    ctx2d.font = `${Math.round(19 * s)}px Georgia, serif`;
+    ctx2d.fillText(o.label, cx, y + 29 * s);
+    titleAreas.push({ x, y, w, h, id: o.id });
+  });
+
+  ctx2d.fillStyle = '#4a4235';
+  ctx2d.font = `${Math.round(12 * s)}px Georgia, serif`;
+  ctx2d.fillText('left click move and attack   right click cast   I inventory   C character   T skills   Tab map   1-4 potions   M mute',
+    cx, canvas.height - 40 * s);
+  ctx2d.textAlign = 'left';
+}
+let titleAreas = [];
+
+function drawDeath() {
+  const s = uiScale;
+  ctx2d.fillStyle = `rgba(40,0,0,${Math.min(0.6, deathScreenT * 0.5)})`;
+  ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+  if (deathScreenT < 0.5) return;
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  ctx2d.textAlign = 'center';
+  ctx2d.fillStyle = '#c02a2a';
+  ctx2d.font = `${Math.round(44 * s)}px Georgia, serif`;
+  ctx2d.fillText('You have died', cx, cy - 20 * s);
+  ctx2d.fillStyle = '#9a8f70';
+  ctx2d.font = `${Math.round(15 * s)}px Georgia, serif`;
+  ctx2d.fillText(corpse ? `${corpse.gold} gold lies where you fell in ${AREA_BY_ID[corpse.area].name}` : 'You carried nothing',
+    cx, cy + 16 * s);
+  if (deathScreenT > 1.2) {
+    ctx2d.fillStyle = '#c8b070';
+    ctx2d.fillText('Click, or press Enter, to wake in the encampment', cx, cy + 52 * s);
+  }
+  ctx2d.textAlign = 'left';
+}
+
+function drawWon() {
+  const s = uiScale;
+  const cx = canvas.width / 2;
+  ctx2d.fillStyle = 'rgba(10,8,14,0.55)';
+  ctx2d.fillRect(0, 60 * s, canvas.width, 90 * s);
+  ctx2d.textAlign = 'center';
+  ctx2d.fillStyle = '#c8a03a';
+  ctx2d.font = `${Math.round(30 * s)}px Georgia, serif`;
+  ctx2d.fillText('Andariel is dead', cx, 105 * s);
+  ctx2d.fillStyle = '#9a8f70';
+  ctx2d.font = `${Math.round(14 * s)}px Georgia, serif`;
+  ctx2d.fillText('The slice is finished. Keep playing if you like.', cx, 132 * s);
+  ctx2d.textAlign = 'left';
+}
+
 function render() {
   renderer.draw(level, cam, { player, fx, projectiles, time: clock, playerLightRadius: 12 });
 }
 
 function draw(fps) {
-  if (!ready) {
-    ctx2d.fillStyle = '#0b0a0e'; ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-    ctx2d.fillStyle = '#c8b070'; ctx2d.font = '20px Georgia, serif';
-    ctx2d.fillText('baking...', 40, 60);
-    if (baker.next().done) { ready = true; build(); }
+  if (state === 'loading') {
+    pumpLoading();
+    ctx2d.fillStyle = '#0b0a0e';
+    ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+    const s = uiScale;
+    const w = Math.min(420 * s, canvas.width - 80 * s);
+    const x = (canvas.width - w) / 2, y = canvas.height / 2;
+    ctx2d.textAlign = 'center';
+    ctx2d.fillStyle = '#c8a03a';
+    ctx2d.font = `${Math.round(30 * s)}px Georgia, serif`;
+    ctx2d.fillText('SANCTUARY', canvas.width / 2, y - 46 * s);
+    ctx2d.fillStyle = '#5f5646';
+    ctx2d.font = `${Math.round(12 * s)}px Georgia, serif`;
+    ctx2d.fillText(`generating ${loadLabel}`, canvas.width / 2, y - 18 * s);
+    ctx2d.textAlign = 'left';
+    ctx2d.strokeStyle = '#4a4235';
+    ctx2d.lineWidth = 1;
+    ctx2d.strokeRect(x + 0.5, y + 0.5, w, 12 * s);
+    ctx2d.fillStyle = '#8a6a2a';
+    ctx2d.fillRect(x + 2, y + 2, (w - 4) * loadPct, 9 * s);
     return;
   }
+
+  if (state === 'title') { drawTitle(); return; }
+
   render();
 
   const hovered = groundItemUnderCursor();
@@ -355,167 +690,76 @@ function draw(fps) {
   const m = entityUnderCursor();
   if (m) drawMonsterBanner(ctx2d, m, cam, uiScale);
 
+  // Corpse marker, so the gold you lost is findable.
+  if (corpse && corpse.area === areaId) {
+    const p = cam.toScreen(corpse.x, corpse.y);
+    const pr = getProp('bones', 0);
+    if (pr) ctx2d.drawImage(pr.canvas, p.x - pr.ox * cam.zoom, p.y - pr.oy * cam.zoom,
+      pr.canvas.width * cam.zoom, pr.canvas.height * cam.zoom);
+    ctx2d.fillStyle = '#ffd24a';
+    ctx2d.font = `${Math.round(12 * uiScale)}px Georgia, serif`;
+    ctx2d.textAlign = 'center';
+    ctx2d.fillText(`${corpse.gold} gold`, p.x, p.y - 22 * uiScale);
+    ctx2d.textAlign = 'left';
+  }
+
   drawMinimap(ctx2d, level, player, ui.mapMode ? 'overlay' : 'corner', canvas.width, canvas.height, uiScale);
   drawHUD(ctx2d, player, { scale: uiScale, iconFor });
-  ui.draw(ctx2d, player, { scale: uiScale, mouse: Input.mouse });
+  ui.onTravel = travelTo;
+  ui.draw(ctx2d, player, {
+    scale: uiScale, mouse: Input.mouse,
+    waypointAreas: WAYPOINT_AREAS.map((id) => AREA_BY_ID[id]),
+    currentArea: areaId,
+  });
 
-  ctx2d.fillStyle = '#8a7f6a';
+  if (state === 'dead') drawDeath();
+  if (state === 'won') drawWon();
+
+  ctx2d.fillStyle = '#6a6050';
   ctx2d.font = `${Math.round(12 * uiScale)}px Georgia, serif`;
-  ctx2d.fillText(`${level.name}   fps ${fps}   I inventory  C character  T skills  V vendor  Tab map  1-4 potions  [ ] next area`,
-    12 * uiScale, 18 * uiScale);
+  ctx2d.fillText(`${level.name}   ${fps} fps`, 12 * uiScale, 18 * uiScale);
 }
 
-// ------------------------------------------------------------------- checks
-
-window.__uiChecks = () => {
-  const out = {};
-  const R = new Rng(31);
-  const { rollItem, describe } = window.__items;
-
-  // Equipping must move the character sheet by exactly what the item says.
-  {
-    const before = { hp: player.maxHp, ar: player.attackRating, def: player.defense, fire: player.resists.fire };
-    const item = rollItem(R, 12, { baseId: 'quilted', rarity: 'normal' });
-    item.mods = { life: 40, ar: 75, def: 30, resFire: 20 };
-    item.defense = 30;
-    item.req = { str: 0, dex: 0 };   // the Sorceress starts under Quilted's 12 strength
-    const slot = { item, gx: 0, gy: 0 };
-    player.inventory.push(slot);
-    ui.equipFromBag(player, slot);
-    const after = { hp: player.maxHp, ar: player.attackRating, def: player.defense, fire: player.resists.fire };
-    out.equip = {
-      lifeDelta: after.hp - before.hp, expectLife: 40,
-      arDelta: after.ar - before.ar, expectAr: 75,
-      defDelta: after.def - before.def, expectDef: 30,
-      fireDelta: after.fire - before.fire, expectFire: 20,
-      equipped: player.equipment.body === item,
-    };
-    out.equip.ok = out.equip.lifeDelta === 40 && out.equip.arDelta === 75
-      && out.equip.defDelta === 30 && out.equip.fireDelta === 20 && out.equip.equipped;
-    player.equipment.body = null; player.recalc();
-  }
-
-  // The bag must never let two items overlap.
-  {
-    player.inventory.length = 0;
-    let placed = 0;
-    for (let i = 0; i < 60; i++) {
-      const it = rollItem(R, 10, {});
-      if (it && addToInventory(player, it)) placed++;
+// Title screen clicks and the first-gesture audio unlock.
+canvas.addEventListener('pointerdown', (e) => {
+  audio.unlock();
+  if (state !== 'title') return;
+  const r = canvas.getBoundingClientRect();
+  const dpr = canvas.width / r.width;
+  const x = (e.clientX - r.left) * dpr, y = (e.clientY - r.top) * dpr;
+  for (const a of titleAreas) {
+    if (x >= a.x && x < a.x + a.w && y >= a.y && y < a.y + a.h) {
+      if (a.id === 'new') newGame(); else continueGame();
+      audio.ambient(level);
+      return;
     }
-    let overlaps = 0, outOfBounds = 0;
-    const occupied = {};
-    for (const sl of player.inventory) {
-      if (sl.gx < 0 || sl.gy < 0 || sl.gx + sl.item.w > 10 || sl.gy + sl.item.h > 4) outOfBounds++;
-      for (let dy = 0; dy < sl.item.h; dy++) {
-        for (let dx = 0; dx < sl.item.w; dx++) {
-          const k = `${sl.gx + dx},${sl.gy + dy}`;
-          if (occupied[k]) overlaps++;
-          occupied[k] = 1;
-        }
-      }
-    }
-    out.grid = { placed, cellsUsed: Object.keys(occupied).length, overlaps, outOfBounds, capacity: 40 };
-    out.grid.ok = overlaps === 0 && outOfBounds === 0 && Object.keys(occupied).length <= 40;
   }
+});
+window.addEventListener('keydown', () => audio.unlock(), { once: true });
+window.addEventListener('beforeunload', () => { if (state === 'playing') save(game); });
 
-  // The tree must refuse anything ungated.
-  {
-    const p2 = new Player({ x: 0, y: 0 });
-    p2.skillPoints = 50;
-    p2.level = 1;
-    const meteorAtLevel1 = allocate(p2, 'meteor');
-    const fireballNoPrereq = allocate(p2, 'fireball');
-    p2.level = 30;
-    const fireballStillNoPrereq = allocate(p2, 'fireball');
-    allocate(p2, 'firebolt');
-    const fireballNowOk = allocate(p2, 'fireball');
-    p2.skillPoints = 0;
-    const noPointsLeft = allocate(p2, 'icebolt');
-    out.skills = {
-      meteorAtLevel1, fireballNoPrereq, fireballStillNoPrereq, fireballNowOk, noPointsLeft,
-      ok: !meteorAtLevel1 && !fireballNoPrereq && !fireballStillNoPrereq && fireballNowOk && !noPointsLeft,
-    };
-  }
-
-  // Vendor arithmetic in both directions.
-  {
-    player.inventory.length = 0;
-    player.gold = 1000;
-    ui.vendorStock = null;
-    const stock = ui.ensureStock(R, 6);
-    const buyItem = stock.find((it) => it.price <= 1000);
-    const goldBefore = player.gold;
-    ui.hitAreas = [{ x: 0, y: 0, w: 10, h: 10, kind: 'buy', data: buyItem }];
-    ui.open = 'vendor';
-    ui.mouseDown(1, 1, player, gctx, 0);
-    const afterBuy = player.gold;
-    const gotItem = player.inventory.some((sl) => sl.item === buyItem);
-
-    const sellIt = player.inventory[0].item;
-    const expectSell = sellValue(sellIt);
-    const beforeSell = player.gold;
-    player.gold += expectSell;
-    removeFromInventory(player, sellIt);
-    out.vendor = {
-      price: buyItem.price, goldBefore, afterBuy, paid: goldBefore - afterBuy, gotItem,
-      sellValue: expectSell, afterSell: player.gold, gained: player.gold - beforeSell,
-      stillInBag: player.inventory.some((sl) => sl.item === sellIt),
-      ok: goldBefore - afterBuy === buyItem.price && gotItem
-        && player.gold - beforeSell === expectSell
-        && !player.inventory.some((sl) => sl.item === sellIt),
-    };
-    ui.open = null;
-  }
-
-  void describe;
-  return out;
-};
-
-// Autoplay policy blocks audio until the user has interacted, so the context is
-// created and resumed on the first gesture rather than at load.
-for (const ev of ['pointerdown', 'keydown']) {
-  window.addEventListener(ev, () => { audio.unlock(); if (level) audio.ambient(level); }, { once: true });
-}
-
-// Render every effect into an OfflineAudioContext and measure it. Sound cannot
-// be heard under automation, but silence can be detected.
-window.__audioCheck = async () => {
-  const out = [];
-  for (const name of audio.EFFECT_NAMES) {
-    const off = new OfflineAudioContext(1, 44100 * 1.6, 44100);
-    audio.init(off);
-    const fired = audio.sfx(name, { big: true });
-    const buf = await off.startRendering();
-    const d = buf.getChannelData(0);
-    let sum = 0, peak = 0;
-    for (let i = 0; i < d.length; i++) { sum += d[i] * d[i]; peak = Math.max(peak, Math.abs(d[i])); }
-    out.push({ name, fired, rms: +Math.sqrt(sum / d.length).toFixed(5), peak: +peak.toFixed(4) });
-  }
-  audio.init(null);
-  return {
-    effects: out.length,
-    silent: out.filter((o) => o.peak < 1e-4).map((o) => o.name),
-    clipping: out.filter((o) => o.peak > 1.0).map((o) => o.name),
-    quietest: out.reduce((a, b) => (a.peak < b.peak ? a : b)),
-    loudest: out.reduce((a, b) => (a.peak > b.peak ? a : b)),
-    all: out,
-  };
-};
-
-window.__setArea = (i) => { areaIdx = i; build(); return level.name; };
+// Verification hooks. A backgrounded tab throttles requestAnimationFrame to
+// about one frame a second, which makes the chunked loader take a minute under
+// automation and any rAF-based timing meaningless.
+window.__forceLoad = () => { while (state === 'loading') pumpLoading(); return true; };
+window.__newGame = () => { newGame(); return areaId; };
+window.__continue = () => { continueGame(); return areaId; };
 window.__render = render;
-window.__ui = ui;
-window.__addInv = (it) => addToInventory(player, it);
-// Draw the whole interface at a chosen cursor position, for screenshots taken
-// while the loop is stopped.
-window.__drawUI = (mx, my) => {
-  Input.mouse.x = mx; Input.mouse.y = my;
-  drawMinimap(ctx2d, level, player, ui.mapMode ? 'overlay' : 'corner', canvas.width, canvas.height, uiScale);
-  drawHUD(ctx2d, player, { scale: uiScale, iconFor });
-  ui.draw(ctx2d, player, { scale: uiScale, mouse: Input.mouse });
+window.__step = step;
+window.__sheetFor = (figure) => assets.figures[figure];
+window.__save = () => save(game);
+window.__clearSave = clearSave;
+window.__enter = (id) => { enterArea(id, null, true); return areaId; };
+window.__killBoss = () => {
+  const b = level.entities.find((e) => e.rank === 'boss' && e.alive);
+  if (!b) return null;
+  b.hp = 0; b.die();
+  killMonster(b);
+  return b.def.name;
 };
-Object.defineProperty(window, '__dbg', { get: () => ({ player, level, fx, gctx, projectiles, ui, cam }) });
-import('./items/item.js').then((m) => { window.__items = m; });
-window.__loop = startLoop({ step, draw });
-void SKILLS; void SKILL_BY_ID; void skillLevel;
+Object.defineProperty(window, '__g', {
+  get: () => ({ player, level, fx, gctx, projectiles, ui, cam, state, areaId, levels, corpse, seed,
+    setState: (s) => { state = s; }, get: (k) => ({ player, level, state, areaId, corpse })[k] }),
+});
+
+startLoop({ step, draw });

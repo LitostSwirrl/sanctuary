@@ -7,6 +7,7 @@
 
 import { Buf, capsule, ellipse, ellipseF, rectF, polyF, lineP, outline, bufToCanvas } from './pixel.js';
 import { ramp, packHex, packRGB, COLORS } from './palette.js';
+import { BASES, POTIONS } from '../items/bases.js';
 
 export const ICON_CELL = 26;
 const OUTLINE = packHex('#0c0a10');
@@ -194,4 +195,26 @@ export function iconFor(item) {
   return ic;
 }
 
-export function clearIconCache() { cache.clear(); }
+// Build every icon up front.
+//
+// Generating on first sight seemed cheap, but the first sight of several item
+// types happens in the single frame where a Fire Ball wipes a pack and all of
+// it drops at once — measured at up to 44ms, a visible hitch in the exact
+// moment the game is meant to feel good. There are only a couple of hundred
+// combinations, so they belong on the loading screen.
+export function* bakeIcons() {
+  const RARITIES = ['normal', 'magic', 'rare', 'unique'];
+  for (const base of BASES) {
+    for (const rarity of RARITIES) {
+      iconFor({ baseId: base.id, rarity, kind: base.kind, w: base.w, h: base.h, base, caster: base.caster });
+    }
+    yield { label: 'icon ' + base.id };
+  }
+  for (const p of POTIONS) {
+    iconFor({ potionId: p.id, potion: p.potion, rarity: 'potion', kind: 'potion', w: 1, h: 1, colour: p.colour });
+  }
+  iconFor({ gold: 1, rarity: 'gold', kind: 'gold', w: 1, h: 1 });
+  yield { label: 'icon potions' };
+}
+
+export function iconCacheSize() { return cache.size; }

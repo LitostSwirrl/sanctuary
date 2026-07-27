@@ -25,8 +25,8 @@ every sprite, tile, item icon and sound effect is computed at load time.
 | 10 | Skills and projectiles | done | 14 skills; mana exact, teleport 200/200 safe, mastery works |
 | 11 | HUD, panels, tooltips | done | equip deltas exact, 0 grid overlaps, gating and vendor correct |
 | 12 | Audio | done | 21 effects render non-silent offline, none clip, throttle works |
-| 13 | Assembly, quests, bosses, save | in progress | |
-| 14 | Packaging and README | pending | |
+| 13 | Assembly, quests, bosses, save | done | full playthrough: traversal, 3 bosses, save round-trip, death |
+| 14 | Packaging and README | in progress | |
 
 ## What works right now
 

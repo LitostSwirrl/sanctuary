@@ -89,6 +89,7 @@ export class UI {
     if (this.open === 'character') this.drawCharacter(ctx, player, L, mx, my);
     if (this.open === 'skills') this.drawSkills(ctx, player, L, mx, my);
     if (this.open === 'vendor') this.drawVendor(ctx, player, L, mx, my, opts);
+    if (this.open === 'waypoint') this.drawWaypoint(ctx, player, L, mx, my, opts);
 
     if (this.drag) {
       const ic = iconFor(this.drag.item);
@@ -432,6 +433,45 @@ export class UI {
     }
   }
 
+  // --------------------------------------------------------------- waypoint
+
+  drawWaypoint(ctx, player, L, mx, my, opts) {
+    const s = L.s;
+    const w = 300 * s, h = 260 * s;
+    const x = ctx.canvas.width / 2 - w / 2, y = ctx.canvas.height / 2 - h / 2;
+    panel(ctx, x, y, w, h);
+    panelTitle(ctx, 'Waypoints', x, y, w, s);
+
+    const list = opts.waypointAreas || [];
+    let ty = y + 52 * s;
+    for (const a of list) {
+      const known = player.waypoints[a.id];
+      const here = a.id === opts.currentArea;
+      const rect = { x: x + 16 * s, y: ty, w: w - 32 * s, h: 30 * s };
+      const hovered = known && !here && this.hovering(rect, mx, my);
+      ctx.fillStyle = hovered ? 'rgba(90,78,44,0.6)' : 'rgba(0,0,0,0.35)';
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.strokeStyle = 'rgba(140,120,70,0.4)';
+      ctx.lineWidth = 1 * s;
+      ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+      ctx.font = `${Math.round(13 * s)}px Georgia, serif`;
+      ctx.fillStyle = here ? '#8fd88f' : known ? '#d6cdb4' : '#5f5646';
+      ctx.fillText(known ? a.name : '- not yet found -', rect.x + 10 * s, rect.y + 20 * s);
+      if (here) {
+        ctx.textAlign = 'right';
+        ctx.fillText('here', rect.x + rect.w - 10 * s, rect.y + 20 * s);
+        ctx.textAlign = 'left';
+      }
+      if (known && !here) this.area(rect, 'travel', a.id);
+      ty += 34 * s;
+    }
+    ctx.fillStyle = '#8a7f6a';
+    ctx.font = `${Math.round(11 * s)}px Georgia, serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Esc to close', x + w / 2, y + h - 14 * s);
+    ctx.textAlign = 'left';
+  }
+
   // ------------------------------------------------------------------- input
 
   // Returns true when the click belonged to the UI.
@@ -443,6 +483,11 @@ export class UI {
       if (!this.hovering(a, mx, my)) continue;
 
       if (a.kind === 'stat' && button === 0) { player.spendStat(a.data); return true; }
+
+      if (a.kind === 'travel' && button === 0) {
+        if (this.onTravel) this.onTravel(a.data);
+        return true;
+      }
 
       if (a.kind === 'skill') {
         if (button === 2) {
@@ -591,6 +636,10 @@ export class UI {
     if (this.open === 'inventory' || this.open === 'vendor') rects.push(L.right);
     if (this.open === 'character' || this.open === 'vendor') rects.push(L.leftPanel);
     if (this.open === 'skills') rects.push(L.wide);
+    if (this.open === 'waypoint') {
+      const w = 300 * ctx.scale, h = 260 * ctx.scale;
+      rects.push({ x: ctx.canvasSize.w / 2 - w / 2, y: ctx.canvasSize.h / 2 - h / 2, w, h });
+    }
     return rects.some((r) => mx >= r.x && my >= r.y && mx < r.x + r.w && my < r.y + r.h);
   }
 
