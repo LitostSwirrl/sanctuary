@@ -1,85 +1,77 @@
-// Phase 1 harness: proves the isometric projection, camera and input wiring.
-// Replaced by the real state machine in a later task.
+// Phase 2 harness: verifies the pixel rasterizer produces crisp, consistently
+// lit shapes. Replaced by the real state machine in a later task.
 
-import { startLoop } from './core/loop.js';
-import { Camera, TILE_W, TILE_H } from './core/iso.js';
-import { Input } from './core/input.js';
-import { Rng, fbm2 } from './core/rng.js';
+import { Buf, capsule, ellipse, polyF, lineP, outline, bufToCanvas, mirrorBuf, rectF } from './art/pixel.js';
+import { ramp, packHex, COLORS } from './art/palette.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const cam = new Camera();
-Input.attach(canvas);
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+ctx.imageSmoothingEnabled = false;
 
-function resize() {
-  // Integer scale only. Pixel art scaled by a fraction looks smeared.
-  const dpr = Math.max(1, Math.min(2, Math.round(window.devicePixelRatio || 1)));
-  canvas.width = Math.floor(window.innerWidth * dpr);
-  canvas.height = Math.floor(window.innerHeight * dpr);
-  cam.resize(canvas.width, canvas.height);
-  cam.zoom = dpr;
-  ctx.imageSmoothingEnabled = false;
-}
-window.addEventListener('resize', resize);
-resize();
+const LINE = packHex('#0d0a10');
 
-const rng = new Rng(1337);
-const noise = fbm2(rng, 3);
-const GRID = 48;
-const target = { x: GRID / 2, y: GRID / 2 };
-cam.x = target.x; cam.y = target.y;
+function sample() {
+  const b = new Buf(64, 64);
+  const skin = ramp(COLORS.sorcSkin);
+  const robe = ramp(COLORS.sorcRobe);
+  const steel = ramp(COLORS.steel);
 
-function step(dt) {
-  if (Input.mouse.downL) {
-    const w = cam.toWorld(Input.mouse.x, Input.mouse.y);
-    target.x = w.x; target.y = w.y;
-  }
-  cam.follow(target, dt);
-  cam.updateShake(dt);
-  Input.endFrame();
+  // Tapered limb, diagonal
+  capsule(b, 10, 54, 5, 24, 20, 3, robe);
+  // Straight thick limb
+  capsule(b, 32, 54, 6, 32, 22, 6, steel);
+  // Round head
+  ellipse(b, 46, 18, 8, 9, skin);
+  // Horizontal thin limb
+  capsule(b, 40, 40, 3, 60, 36, 2, robe);
+  // Polygon (a shield-ish shape)
+  polyF(b, [4, 8, 20, 4, 22, 20, 12, 30, 2, 18], packHex(COLORS.gold));
+  // Hard line
+  lineP(b, 2, 62, 62, 62, packHex(COLORS.blood), 1);
+
+  outline(b, LINE);
+  return bufToCanvas(b);
 }
 
-function drawDiamond(sx, sy, fill, stroke) {
-  const hw = (TILE_W / 2) * cam.zoom, hh = (TILE_H / 2) * cam.zoom;
-  ctx.beginPath();
-  ctx.moveTo(sx, sy - hh);
-  ctx.lineTo(sx + hw, sy);
-  ctx.lineTo(sx, sy + hh);
-  ctx.lineTo(sx - hw, sy);
-  ctx.closePath();
-  ctx.fillStyle = fill;
-  ctx.fill();
-  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+function rampStrip() {
+  const names = ['sorcRobe', 'fallenSkin', 'zombieSkin', 'boneWhite', 'steel', 'leather', 'gold', 'ice'];
+  const b = new Buf(names.length * 16, 16);
+  names.forEach((n, i) => {
+    const r = ramp(COLORS[n]);
+    rectF(b, i * 16, 0, 16, 4, r.light);
+    rectF(b, i * 16, 4, 16, 4, r.base);
+    rectF(b, i * 16, 8, 16, 4, r.dark);
+    rectF(b, i * 16, 12, 16, 4, r.line);
+  });
+  return bufToCanvas(b);
 }
 
-function draw(fps) {
-  ctx.fillStyle = '#0b0a0e';
+const spr = sample();
+const mir = bufToCanvas(mirrorBuf((() => {
+  const b = new Buf(64, 64);
+  capsule(b, 10, 54, 5, 24, 20, 3, ramp(COLORS.sorcRobe));
+  ellipse(b, 46, 18, 8, 9, ramp(COLORS.sorcSkin));
+  outline(b, LINE);
+  return b;
+})()));
+const strip = rampStrip();
+
+function draw() {
+  ctx.fillStyle = '#17151c';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  const b = cam.visibleTileBounds();
-  for (let y = Math.max(0, b.y0); y <= Math.min(GRID - 1, b.y1); y++) {
-    for (let x = Math.max(0, b.x0); x <= Math.min(GRID - 1, b.x1); x++) {
-      const p = cam.toScreen(x, y);
-      const n = noise(x * 0.12, y * 0.12);
-      const v = Math.floor(40 + n * 60);
-      drawDiamond(p.x, p.y, `rgb(${v},${Math.floor(v * 0.95)},${Math.floor(v * 0.7)})`, 'rgba(0,0,0,0.18)');
-    }
-  }
-
-  // Cursor tile
-  const w = cam.toWorld(Input.mouse.x, Input.mouse.y);
-  const cx = Math.floor(w.x), cy = Math.floor(w.y);
-  const cp = cam.toScreen(cx, cy);
-  drawDiamond(cp.x, cp.y, 'rgba(220,190,110,0.25)', 'rgba(240,220,140,0.9)');
-
-  // Camera focus marker
-  const tp = cam.toScreen(target.x, target.y);
-  ctx.fillStyle = '#e8d9a0';
-  ctx.beginPath(); ctx.arc(tp.x, tp.y, 5, 0, Math.PI * 2); ctx.fill();
-
   ctx.fillStyle = '#8f8158';
-  ctx.font = '16px Georgia, serif';
-  ctx.fillText(`fps ${fps}  tile ${cx},${cy}`, 16, 26);
-}
+  ctx.font = '14px Georgia, serif';
+  ctx.fillText('1x', 40, 30);
+  ctx.drawImage(spr, 40, 40);
+  ctx.fillText('4x  (checking for antialias fringe and one-pixel outline)', 140, 30);
+  ctx.drawImage(spr, 140, 40, 256, 256);
+  ctx.fillText('mirrored', 440, 30);
+  ctx.drawImage(mir, 440, 40, 256, 256);
 
-startLoop({ step, draw });
+  ctx.fillText('ramps: light / base / dark / line', 40, 340);
+  ctx.drawImage(strip, 40, 350, strip.width * 4, strip.height * 4);
+}
+draw();
