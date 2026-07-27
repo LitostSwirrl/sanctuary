@@ -103,14 +103,18 @@ function bakeGroundVariant(terrain, rng) {
 
 // ------------------------------------------------------------------- walls
 
+// Indoors these are built walls: tall, with the same material top and face.
+// Outdoors they are raised banks, so the face is exposed rock and the top keeps
+// the terrain colour. Grass-topped cubes of full wall height read as an
+// artificial maze rather than landscape.
 const WALL_STYLE = {
-  cave:   { face: '#4b4438', top: '#5a5244', h: 46 },
-  crypt:  { face: '#52505a', top: '#63606c', h: 46 },
-  cobble: { face: '#5a5348', top: '#6b6355', h: 42 },
-  grass:  { face: '#3f4a2c', top: '#4e5c36', h: 38 },
-  dirt:   { face: '#514231', top: '#63513c', h: 40 },
-  blood:  { face: '#4a2622', top: '#5a302a', h: 42 },
-  snow:   { face: '#6b7080', top: '#8b90a0', h: 40 },
+  cave:   { face: '#4b4438', top: '#5a5244', h: 46, built: true },
+  crypt:  { face: '#52505a', top: '#63606c', h: 46, built: true },
+  cobble: { face: '#5a5348', top: '#6b6355', h: 42, built: true },
+  grass:  { face: '#5c5140', top: '#46552f', h: 26 },
+  dirt:   { face: '#5c5140', top: '#5b4a33', h: 24 },
+  blood:  { face: '#4a3a30', top: '#4a2622', h: 26 },
+  snow:   { face: '#6b7080', top: '#7d8290', h: 26 },
 };
 
 function bakeWall(terrain, rng) {
@@ -142,7 +146,7 @@ function bakeWall(terrain, rng) {
   }
 
   // Masonry courses on built walls, cracks on natural rock.
-  if (terrain === 'crypt' || terrain === 'cobble') {
+  if (s.built && (terrain === 'crypt' || terrain === 'cobble')) {
     const dark = packRGB(0, 0, 0, 70);
     for (let k = 1; k * 12 < H; k++) {
       const yy = 31 + k * 12;
