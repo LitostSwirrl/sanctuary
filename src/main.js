@@ -1,8 +1,7 @@
-// Phase 2 harness: verifies the pixel rasterizer produces crisp, consistently
-// lit shapes. Replaced by the real state machine in a later task.
+// Phase 3 harness: contact sheet of every animation frame, so the pose curves
+// can be checked directly. Replaced by the real state machine in a later task.
 
-import { Buf, capsule, ellipse, polyF, lineP, outline, bufToCanvas, mirrorBuf, rectF } from './art/pixel.js';
-import { ramp, packHex, COLORS } from './art/palette.js';
+import { bakeAllFigures, CELL, ANIMS } from './art/figures.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -10,68 +9,46 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 ctx.imageSmoothingEnabled = false;
 
-const LINE = packHex('#0d0a10');
+const sheets = {};
+const t0 = performance.now();
+for (const _ of bakeAllFigures(sheets)) { /* synchronous for the harness */ }
+const bakeMs = Math.round(performance.now() - t0);
 
-function sample() {
-  const b = new Buf(64, 64);
-  const skin = ramp(COLORS.sorcSkin);
-  const robe = ramp(COLORS.sorcRobe);
-  const steel = ramp(COLORS.steel);
+const SHOW = ['sorceress', 'fallen', 'skeleton', 'andariel'];
+const DIR = 1; // south-east, the most legible three-quarter view
 
-  // Tapered limb, diagonal
-  capsule(b, 10, 54, 5, 24, 20, 3, robe);
-  // Straight thick limb
-  capsule(b, 32, 54, 6, 32, 22, 6, steel);
-  // Round head
-  ellipse(b, 46, 18, 8, 9, skin);
-  // Horizontal thin limb
-  capsule(b, 40, 40, 3, 60, 36, 2, robe);
-  // Polygon (a shield-ish shape)
-  polyF(b, [4, 8, 20, 4, 22, 20, 12, 30, 2, 18], packHex(COLORS.gold));
-  // Hard line
-  lineP(b, 2, 62, 62, 62, packHex(COLORS.blood), 1);
+ctx.fillStyle = '#1b1820';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.font = '12px Georgia, serif';
 
-  outline(b, LINE);
-  return bufToCanvas(b);
+let y = 16;
+for (const name of SHOW) {
+  const sheet = sheets[name];
+  ctx.fillStyle = '#c8b070';
+  ctx.fillText(name, 8, y + 12);
+  y += 18;
+  for (const anim of Object.keys(ANIMS)) {
+    if (!sheet.has(anim)) continue;
+    ctx.fillStyle = '#7a6f52';
+    ctx.fillText(anim, 8, y + CELL / 2);
+    for (let f = 0; f < ANIMS[anim]; f++) {
+      const x = 64 + f * (CELL + 2);
+      ctx.fillStyle = f % 2 ? '#232029' : '#26232d';
+      ctx.fillRect(x, y, CELL, CELL);
+      const ix = sheet.index(anim, DIR, f);
+      ctx.save();
+      if (ix.flip) { ctx.translate(x + CELL, y); ctx.scale(-1, 1); ctx.drawImage(sheet.canvas, ix.sx, ix.sy, CELL, CELL, 0, 0, CELL, CELL); }
+      else ctx.drawImage(sheet.canvas, ix.sx, ix.sy, CELL, CELL, x, y, CELL, CELL);
+      ctx.restore();
+      // ground line, to check the feet stay planted
+      ctx.strokeStyle = 'rgba(200,160,80,0.25)';
+      ctx.beginPath(); ctx.moveTo(x, y + 70.5); ctx.lineTo(x + CELL, y + 70.5); ctx.stroke();
+    }
+    y += CELL + 2;
+  }
+  y += 10;
 }
 
-function rampStrip() {
-  const names = ['sorcRobe', 'fallenSkin', 'zombieSkin', 'boneWhite', 'steel', 'leather', 'gold', 'ice'];
-  const b = new Buf(names.length * 16, 16);
-  names.forEach((n, i) => {
-    const r = ramp(COLORS[n]);
-    rectF(b, i * 16, 0, 16, 4, r.light);
-    rectF(b, i * 16, 4, 16, 4, r.base);
-    rectF(b, i * 16, 8, 16, 4, r.dark);
-    rectF(b, i * 16, 12, 16, 4, r.line);
-  });
-  return bufToCanvas(b);
-}
-
-const spr = sample();
-const mir = bufToCanvas(mirrorBuf((() => {
-  const b = new Buf(64, 64);
-  capsule(b, 10, 54, 5, 24, 20, 3, ramp(COLORS.sorcRobe));
-  ellipse(b, 46, 18, 8, 9, ramp(COLORS.sorcSkin));
-  outline(b, LINE);
-  return b;
-})()));
-const strip = rampStrip();
-
-function draw() {
-  ctx.fillStyle = '#17151c';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  ctx.fillStyle = '#8f8158';
-  ctx.font = '14px Georgia, serif';
-  ctx.fillText('1x', 40, 30);
-  ctx.drawImage(spr, 40, 40);
-  ctx.fillText('4x  (checking for antialias fringe and one-pixel outline)', 140, 30);
-  ctx.drawImage(spr, 140, 40, 256, 256);
-  ctx.fillText('mirrored', 440, 30);
-  ctx.drawImage(mir, 440, 40, 256, 256);
-
-  ctx.fillText('ramps: light / base / dark / line', 40, 340);
-  ctx.drawImage(strip, 40, 350, strip.width * 4, strip.height * 4);
-}
-draw();
+ctx.fillStyle = '#a89868';
+ctx.fillText(`bake ${bakeMs}ms   dir=SE   ground line at y=70`, 8, canvas.height - 8);
+console.log('[bake]', bakeMs + 'ms');
