@@ -22,7 +22,7 @@ the plan has been observed in a browser. See progress.md for the verification re
 - **Spec**: `docs/superpowers/specs/2026-07-28-diablo-vertical-slice-design.md`
 - **Plan**: `docs/superpowers/plans/2026-07-28-diablo-vertical-slice.md` — task list with exact files and published interfaces
 - **Read order for a new session**: CLAUDE.md → plan (the task being executed) → this file → the source files that task names
-- **Run it**: `python3 -m http.server 8231` from the project root, then open `http://localhost:8231/index.html`
+- **Run it**: `node serve.js` from the project root, then open `http://localhost:8231/index.html`. Use serve.js rather than python3 -m http.server: it sends no-store, and a cached ES module once made a real fix look like it had failed.
 - **No assets, no dependencies, no bundler.** Plain ES modules with explicit `.js` extensions. No emoji anywhere.
 - **Verification is browser-driven.** Chrome DevTools MCP is blocked by a stale profile lock in this environment; use claude-in-chrome instead.
 - **A backgrounded tab throttles requestAnimationFrame to about 1 fps.** This breaks both chunked loading and any rAF-based timing under automation. `src/main.js` therefore exposes `window.__forceLoad()` to drain the loader synchronously and `window.__bench(n)` to time `step`+`render` in a synchronous loop. Keep equivalent hooks in any harness.
