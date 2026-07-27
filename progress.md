@@ -26,17 +26,13 @@ every sprite, tile, item icon and sound effect is computed at load time.
 | 11 | HUD, panels, tooltips | done | equip deltas exact, 0 grid overlaps, gating and vendor correct |
 | 12 | Audio | done | 21 effects render non-silent offline, none clip, throttle works |
 | 13 | Assembly, quests, bosses, save | done | full playthrough: traversal, 3 bosses, save round-trip, death |
-| 14 | Packaging and README | in progress | |
+| 14 | Packaging and README | done | 303KB single file, 0 external refs, runs and plays |
 
 ## What works right now
 
-The rendering foundation is complete and running in a browser. A generated level draws in
-isometric with depth-sorted walls, props and animated figures, lit by a light buffer that
-is multiplied over the scene — room corners go dark, a torch carves out a radius, and
-walking behind a wall correctly hides the lower body.
-
-All six areas generate from a seed with every exit, spawn point, waypoint and boss room
-reachable from the entrance.
+All fourteen tasks are complete. The game is playable start to finish: a new Sorceress in the
+Rogue Encampment, out through the Blood Moor, the Den of Evil, Cold Plains and Burial Grounds,
+down into the Catacombs, and Andariel dies at the end of it.
 
 ## Measurements
 

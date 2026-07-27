@@ -11,10 +11,10 @@
 - **Task 4 — Tiles, props, particles, loading**: done (2026-07-28)
 - **Task 5 — Level structures, generators, pathing**: done (2026-07-28)
 - **Task 6 — Renderer and lighting**: done (2026-07-28)
-- **Task 7 — Player, movement, combat formulas**: next
-- **Tasks 8-14** — items, monsters/AI, skills, UI, audio, assembly, packaging: pending
+- **Tasks 7-14** — player and combat, items, monsters and AI, skills, UI, audio, assembly, packaging: all done (2026-07-28)
 
-Rendering foundation is complete and verified in a browser. Everything remaining is game systems.
+All fourteen tasks are complete. The game is playable start to finish and every phase check in
+the plan has been observed in a browser. See progress.md for the verification record.
 
 ## Cross-cutting contracts
 
