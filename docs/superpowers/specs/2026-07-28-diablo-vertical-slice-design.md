@@ -176,7 +176,7 @@ level 20 is pointless. Level cap for the slice is **30**.
 
 ## 8. Skills (`src/game/skills.js`)
 
-Thirteen skills, one point per level, D2 prerequisite gating, real synergies.
+Fourteen skills, one point per level, D2 prerequisite gating, real synergies.
 
 | Tree | Skill | Req lvl | Effect | Synergies |
 |------|-------|---------|--------|-----------|

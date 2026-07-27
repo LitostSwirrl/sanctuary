@@ -248,7 +248,7 @@ export class Renderer {
     ctx.globalCompositeOperation = 'lighter';
     const r = (p.drawR || 5) * z;
     const g = ctx.createRadialGradient(s.x, y, 0, s.x, y, r * 2.4);
-    g.addColorStop(0, p.color || '#ffcc66');
+    g.addColorStop(0, p.colour || '#ffcc66');
     g.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = g;
     ctx.beginPath();

@@ -1,6 +1,6 @@
-// Phase 9 harness: a playable slice with live monsters, melee combat both
-// ways, and loot. Projectiles are stubbed as hitscan until the next task.
-// Replaced by the real state machine in a later task.
+// Phase 10 harness: the slice with the full skill trees wired up. Left click
+// moves and melees, right click casts. Replaced by the real state machine in
+// the next task.
 
 import { startLoop } from './core/loop.js';
 import { Camera } from './core/iso.js';
@@ -14,10 +14,15 @@ import { generate } from './world/gen.js';
 import { Renderer } from './render/renderer.js';
 import { drawMinimap } from './render/minimap.js';
 import { Player } from './game/player.js';
-import { applyDamage, rollHit, rollDamage, tickBurn, xpPenalty } from './game/combat.js';
-import { populate, spawnBoss, spawnPack, Monster } from './game/monster.js';
+import { applyDamage, applyChill, rollHit, rollDamage, tickBurn, xpPenalty } from './game/combat.js';
+import { populate, spawnBoss, Monster } from './game/monster.js';
 import { updateAI } from './game/ai.js';
 import { dropLoot, pickUp } from './game/loot.js';
+import { Projectiles } from './game/projectile.js';
+import {
+  SKILLS, SKILL_BY_ID, castSkill, allocate, manaCost, skillDamage,
+  skillLevel, refreshPassives, pierceTable,
+} from './game/skills.js';
 
 const canvas = document.getElementById('game');
 const ctx2d = canvas.getContext('2d');
@@ -44,44 +49,71 @@ window.__forceLoad = () => { while (!ready) if (baker.next().done) { ready = tru
 
 let level = null, player = null, clock = 0, areaIdx = 2;
 const fx = new Particles();
+const projectiles = new Projectiles();
 const rng = new Rng(20260728);
-const stubbedShots = [];
-let log = [];
+const CASTABLE = SKILLS.filter((s) => !s.passive);
+let skillIdx = 0;
 
 function build() {
   const def = AREAS[areaIdx];
   level = generate(def, 20260728 + areaIdx * 7919);
   player = new Player({ x: level.start.x, y: level.start.y, sheet: assets.figures.sorceress });
-  player.stats.vit = 40; player.stats.str = 30; player.recalc(true);
+  player.level = 30; player.statPoints = 0;
+  player.stats.vit = 60; player.stats.ene = 90; player.stats.str = 40; player.stats.dex = 40;
+  player.skillPoints = 200;
+  for (const s of SKILLS) for (let i = 0; i < 8; i++) allocate(player, s.id);
+  refreshPassives(player);
+  player.recalc(true);
   populate(level, def, rng, assets.figures);
   if (def.boss) spawnBoss(level, def.boss, rng, assets.figures);
   cam.x = player.x; cam.y = player.y;
   level.markExplored(player.x, player.y, 14);
-  fx.clear();
-  log = [];
+  fx.clear(); projectiles.clear();
 }
 
-// ------------------------------------------------------------- AI context
+// ---------------------------------------------------------------- game ctx
 
-const aiCtx = {
+function killMonster(m) {
+  const pen = xpPenalty(player.level, m.mlvl);
+  player.gainXp(Math.round(m.xpValue * pen), () => FX.levelUp(fx, player.x, player.y));
+  FX.death(fx, m.x, m.y);
+  dropLoot(level, m, player, rng);
+}
+
+const gctx = {
   get level() { return level; },
   get player() { return player; },
-  fx, rng, dt: 1 / 60,
+  fx, rng, projectiles, dt: 1 / 60,
   get time() { return clock; },
+  sfx: null,
 
-  // Stubbed until the projectile system lands: resolve as an instant hit so
-  // ranged behaviour is still exercised end to end.
+  damageMonster(m, dmg, opts = {}) {
+    if (!m.alive) return 0;
+    const before = m.hp;
+    applyDamage(m, dmg, opts);
+    if (opts.chill) applyChill(m, opts.chill.seconds, opts.chill.amount);
+    const dealt = before - m.hp;
+    if (dealt > 0) {
+      fx.float(m.x, m.y, String(Math.round(dealt)), 'rgba(255,240,200,1)');
+      if (opts.absolute === undefined) FX.hitSpark(fx, m.x, m.y);
+    }
+    if (!m.alive) killMonster(m);
+    return dealt;
+  },
+
   spawnProjectile(o) {
-    stubbedShots.push({ t: clock, owner: o.owner && o.owner.defId, element: o.element });
-    const dmg = {};
-    dmg[o.element === 'phys' ? 'phys' : o.element] = o.min + Math.random() * (o.max - o.min);
-    hurtPlayer(dmg, o.owner);
-    fx.arc(o.x, o.y, player.x, player.y, { z: 14, r: 255, g: 150, b: 60, life: 0.12 });
+    projectiles.spawn({
+      ...o,
+      onHit: (p, target) => {
+        const dmg = {};
+        dmg[o.element === 'phys' ? 'phys' : o.element] = o.min + rng.f() * (o.max - o.min);
+        hurtPlayer(dmg, o.owner);
+      },
+    });
   },
 
   meleeHit(m) {
-    const d = m.distTo(player);
-    if (d > m.attackRange + 0.6) return;
+    if (m.distTo(player) > m.attackRange + 0.6) return;
     if (!rollHit(rng, m.attackRating, player.defense, m.mlvl, player.level)) {
       fx.float(player.x, player.y, 'miss', 'rgba(190,190,190,1)');
       return;
@@ -93,28 +125,24 @@ const aiCtx = {
   },
 
   novaHit(m, o) {
-    const d = m.distTo(player);
-    if (d > o.radius) return;
+    if (m.distTo(player) > o.radius) return;
     const dmg = {};
-    dmg[o.element] = o.min + Math.random() * (o.max - o.min);
+    dmg[o.element] = o.min + rng.f() * (o.max - o.min);
     hurtPlayer(dmg, m);
   },
 
   resurrect(shaman, corpse) {
     corpse.resurrected = true;
-    const m = new Monster(corpse.defId, corpse.mlvl, {
-      x: corpse.x, y: corpse.y, rank: 'normal', rng, sheet: corpse.sheet,
-    });
+    const m = new Monster(corpse.defId, corpse.mlvl, { x: corpse.x, y: corpse.y, rng, sheet: corpse.sheet });
     m.state = 'chase';
     level.addEntity(m);
     corpse.remove = true;
     fx.burst('ember', corpse.x, corpse.y, 18, { z: 8, spread: 2.4, r: 255, g: 180, b: 60 });
-    log.push(`shaman resurrected ${corpse.defId} at ${clock.toFixed(1)}s`);
     return m;
   },
 
   summon(defId, x, y, mlvl) {
-    const m = new Monster(defId, mlvl, { x, y, rank: 'normal', rng, sheet: assets.figures[Monster.prototype ? defId : defId] });
+    const m = new Monster(defId, mlvl, { x, y, rng, sheet: assets.figures[defId] });
     m.sheet = assets.figures[m.def.figure];
     m.state = 'chase';
     level.addEntity(m);
@@ -129,19 +157,8 @@ function hurtPlayer(dmg, source) {
   const dealt = before - player.hp;
   if (dealt > 0) {
     fx.float(player.x, player.y, `-${Math.round(dealt)}`, 'rgba(255,90,80,1)');
-    FX.hitBlood(fx, player.x, player.y);
-    cam.addShake(2.5);
+    cam.addShake(2.2);
   }
-}
-
-function killMonster(m) {
-  const pen = xpPenalty(player.level, m.mlvl);
-  player.gainXp(Math.round(m.xpValue * pen), (lvl) => {
-    FX.levelUp(fx, player.x, player.y);
-    fx.float(player.x, player.y, `Level ${lvl}`, 'rgba(255,230,140,1)', { life: 1.6 });
-  });
-  FX.death(fx, m.x, m.y);
-  dropLoot(level, m, player, rng);
 }
 
 function playerAttack(target) {
@@ -156,14 +173,19 @@ function playerAttack(target) {
         return;
       }
       const raw = rollDamage(rng, player.minDamage, player.maxDamage, player.totals.ed, player.effective.str);
-      const before = target.hp;
-      applyDamage(target, { phys: raw }, { source: player });
-      fx.float(target.x, target.y, String(Math.round(before - target.hp)), 'rgba(255,240,200,1)');
-      FX.hitBlood(fx, target.x, target.y);
-      if (!target.alive) killMonster(target);
+      gctx.damageMonster(target, { phys: raw }, { source: player });
     },
-    onEnd: () => { player.setAnim('idle'); },
+    onEnd: () => player.setAnim('idle'),
   });
+}
+
+function doCast(id, tx, ty) {
+  const r = castSkill(player, id, tx, ty, gctx);
+  if (r === 'mana') { fx.float(player.x, player.y, 'not enough mana', 'rgba(120,140,255,1)'); return; }
+  if (r !== 'ok') return;
+  player.busy = 0.4 / (1 + player.castRate / 100);
+  player.face(tx, ty);
+  player.setAnim('cast', { loop: false, force: true, onEnd: () => player.setAnim('idle') });
 }
 
 function monsterUnderCursor() {
@@ -182,8 +204,16 @@ function monsterUnderCursor() {
 function step(dt) {
   if (!ready) return;
   clock += dt;
+  gctx.dt = dt;
 
   if (Input.consume('BracketRight')) { areaIdx = (areaIdx + 1) % AREAS.length; build(); return; }
+  if (Input.mouse.wheel) skillIdx = (skillIdx + CASTABLE.length + Math.sign(Input.mouse.wheel)) % CASTABLE.length;
+  for (let i = 1; i <= 9; i++) {
+    if (Input.consume('Digit' + i) && CASTABLE[i - 1]) skillIdx = i - 1;
+  }
+
+  const w = cam.toWorld(Input.mouse.x, Input.mouse.y);
+  if (Input.mouse.downR && player.alive && player.busy <= 0) doCast(CASTABLE[skillIdx].id, w.x, w.y);
 
   if (Input.mouse.downL && player.alive && player.busy <= 0) {
     const m = monsterUnderCursor();
@@ -192,17 +222,12 @@ function step(dt) {
       if (player.distTo(m) <= 1.5) { player.stop(); playerAttack(m); }
       else player.moveTo(level, m.x, m.y);
     } else {
-      const w = cam.toWorld(Input.mouse.x, Input.mouse.y);
       player.target = null;
-      if (!player.moveGoal || Math.hypot(w.x - player.moveGoal.x, w.y - player.moveGoal.y) > 0.8) {
-        player.moveTo(level, w.x, w.y);
-      }
+      if (!player.moveGoal || Math.hypot(w.x - player.moveGoal.x, w.y - player.moveGoal.y) > 0.8) player.moveTo(level, w.x, w.y);
     }
   }
-  if (player.target && player.alive && player.busy <= 0 && player.target.alive
-      && player.distTo(player.target) <= 1.5) {
-    player.stop();
-    playerAttack(player.target);
+  if (player.target && player.alive && player.busy <= 0 && player.target.alive && player.distTo(player.target) <= 1.5) {
+    player.stop(); playerAttack(player.target);
   }
 
   player.update(dt, level);
@@ -210,13 +235,17 @@ function step(dt) {
 
   for (const e of level.entities) {
     if (e.isPlayer) continue;
-    if (e.alive) tickBurn(e, dt);
-    updateAI(e, dt, aiCtx);
+    if (e.alive && e.burning > 0) {
+      const before = e.hp;
+      tickBurn(e, dt);
+      if (!e.alive && before > 0) killMonster(e);
+    }
+    updateAI(e, dt, gctx);
     if (!e.alive && e.corpseTimer > 40) e.remove = true;
   }
   level.removeDead();
+  projectiles.update(dt, gctx);
 
-  // Walk-over pickup for gold, click for the rest.
   for (const gi of level.items) {
     if (gi.taken) continue;
     const d = Math.hypot(gi.x - player.x, gi.y - player.y);
@@ -232,7 +261,7 @@ function step(dt) {
 }
 
 function render() {
-  renderer.draw(level, cam, { player, fx, time: clock, playerLightRadius: 12 });
+  renderer.draw(level, cam, { player, fx, projectiles, time: clock, playerLightRadius: 12 });
 }
 
 function draw(fps) {
@@ -247,125 +276,112 @@ function draw(fps) {
   drawMinimap(ctx2d, level, player, 'corner', canvas.width, canvas.height, cam.zoom);
 
   const z = cam.zoom;
+  const sk = CASTABLE[skillIdx];
+  const dmg = skillDamage(player, sk.id);
   ctx2d.fillStyle = '#c8b070';
   ctx2d.font = `${13 * z}px Georgia, serif`;
   const alive = level.entities.filter((e) => e.alive && !e.isPlayer).length;
   ctx2d.fillText(
-    `${level.name}  fps ${fps}  lvl ${player.level} xp ${player.xp}  life ${Math.round(player.hp)}/${player.maxHp}  ` +
-    `gold ${player.gold}  bag ${player.inventory.length}  monsters ${alive}  items ${level.items.filter((i) => !i.taken).length}  [ ] next area`,
-    12 * z, 20 * z);
+    `${level.name}  fps ${fps}  life ${Math.round(player.hp)}/${player.maxHp}  mana ${Math.round(player.mana)}/${player.maxMana}  ` +
+    `monsters ${alive}  shots ${projectiles.list.length}  [ ] next area`, 12 * z, 20 * z);
+  ctx2d.fillStyle = '#ffe08a';
+  ctx2d.fillText(
+    `right click: ${sk.name} (lvl ${skillLevel(player, sk.id)})  mana ${manaCost(player, sk.id)}` +
+    (dmg ? `  dmg ${dmg.min}-${dmg.max}` : '') + '   digits 1-9 / wheel to switch',
+    12 * z, 40 * z);
 
-  // Health bars above hurt monsters and any unique.
   for (const e of level.entities) {
     if (!e.alive || e.isPlayer) continue;
     if (e.hp >= e.maxHp && !e.uniqueAura) continue;
     const s = cam.toScreen(e.x, e.y);
-    const w = 34 * z, h = 4 * z, y = s.y - 62 * z;
+    const w2 = 34 * z, h = 4 * z, y = s.y - 62 * z;
     ctx2d.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx2d.fillRect(s.x - w / 2, y, w, h);
+    ctx2d.fillRect(s.x - w2 / 2, y, w2, h);
     ctx2d.fillStyle = e.uniqueAura || '#b03030';
-    ctx2d.fillRect(s.x - w / 2, y, w * Math.max(0, e.hp / e.maxHp), h);
+    ctx2d.fillRect(s.x - w2 / 2, y, w2 * Math.max(0, e.hp / e.maxHp), h);
   }
 }
 
 // ------------------------------------------------------------------- checks
 
-window.__aiChecks = () => {
-  const out = {};
-  const R = new Rng(5);
+window.__skillChecks = () => {
+  const results = [];
+  const dummySheet = assets.figures.zombie;
 
-  // Wake radius: a monster placed beyond its wake distance stays idle.
-  {
-    const m = new Monster('fallen', 3, { x: player.x + 30, y: player.y, rng: R, sheet: assets.figures.fallen });
+  const freshDummy = (opts = {}) => {
+    const p = level.nearestOpen(player.x + 2.5, player.y, 6);
+    const m = new Monster('zombie', 1, { x: p.x, y: p.y, rng, sheet: dummySheet });
+    m.maxHp = 500000; m.hp = 500000;
+    m.state = 'idle'; m.wake = 0;
+    Object.assign(m.resists, opts.resists || {});
     level.addEntity(m);
-    updateAI(m, 1 / 60, aiCtx);
-    const farIdle = m.state === 'idle';
-    m.x = player.x + m.wake - 1; m.y = player.y;
-    updateAI(m, 1 / 60, aiCtx);
-    const nearAwake = m.state !== 'idle';
-    m.remove = true; level.removeDead();
-    out.wake = { farStaysIdle: farIdle, nearWakes: nearAwake, radius: m.wake };
+    return m;
+  };
+
+  for (const sk of CASTABLE) {
+    const m = freshDummy();
+    player.mana = player.maxMana;
+    const manaBefore = player.mana;
+    const hpBefore = m.hp;
+    const px = player.x, py = player.y;
+
+    const r = castSkill(player, sk.id, m.x, m.y, gctx);
+    // Let projectiles fly and delayed effects land.
+    for (let i = 0; i < 200; i++) { projectiles.update(1 / 60, gctx); fx.update(1 / 60); }
+
+    results.push({
+      skill: sk.name,
+      cast: r,
+      manaSpent: +(manaBefore - player.mana).toFixed(1),
+      expectedMana: manaCost(player, sk.id),
+      damaged: +(hpBefore - m.hp).toFixed(1),
+      moved: sk.id === 'teleport' ? +Math.hypot(player.x - px, player.y - py).toFixed(2) : undefined,
+    });
+    if (sk.id === 'teleport') { player.x = px; player.y = py; }
+    m.remove = true;
+    level.removeDead();
   }
 
-  // Melee lands exactly once per swing, on the animation's hit frame.
-  {
-    let hits = 0, frames = [];
-    const m = new Monster('fallen', 3, { x: player.x + 0.8, y: player.y, rng: R, sheet: assets.figures.fallen });
-    level.addEntity(m);
-    m.state = 'chase'; m.cool = 0;
-    const realHit = aiCtx.meleeHit;
-    aiCtx.meleeHit = (mm) => { hits++; frames.push(mm.frame); };
-    for (let i = 0; i < 40; i++) updateAI(m, 1 / 60, aiCtx);
-    aiCtx.meleeHit = realHit;
-    m.remove = true; level.removeDead();
-    out.melee = { swings: hits, hitFrames: frames, oncePerSwing: frames.every((f) => f === 3) };
+  // Teleport must never land inside a wall.
+  let intoWall = 0, attempts = 0;
+  for (let i = 0; i < 200; i++) {
+    const a = rng.f() * Math.PI * 2, d = 4 + rng.f() * 12;
+    player.mana = player.maxMana;
+    castSkill(player, 'teleport', player.x + Math.cos(a) * d, player.y + Math.sin(a) * d, gctx);
+    attempts++;
+    if (level.blockedCircle(player.x, player.y, player.radius)) intoWall++;
   }
 
-  // A pack spreads out instead of stacking on one tile.
-  {
-    const at = level.nearestOpen(player.x + 6, player.y + 6, 8);
-    const pack = spawnPack(level, 'devilkin', R, { at, count: 6, sheets: assets.figures, rank: 'normal', mlvl: 5 });
-    for (const m of pack) m.state = 'chase';
-    for (let i = 0; i < 240; i++) for (const m of pack) updateAI(m, 1 / 60, aiCtx);
-    let minD = Infinity;
-    for (let i = 0; i < pack.length; i++) {
-      for (let j = i + 1; j < pack.length; j++) minD = Math.min(minD, pack[i].distTo(pack[j]));
+  // A mastery must raise damage against a resistant target.
+  const measure = (masteryPts, resist) => {
+    const saved = player.skills.firemastery;
+    player.skills.firemastery = masteryPts;
+    const m = freshDummy({ resists: { fire: resist } });
+    let total = 0;
+    for (let i = 0; i < 40; i++) {
+      const before = m.hp;
+      SKILL_BY_ID.firebolt.cast(player, skillLevel(player, 'firebolt'), m.x, m.y, gctx);
+      for (let k = 0; k < 60; k++) projectiles.update(1 / 60, gctx);
+      total += before - m.hp;
     }
-    for (const m of pack) m.remove = true;
-    level.removeDead();
-    out.separation = { minPairDistance: +minD.toFixed(3), sumRadii: +(0.30 * 2).toFixed(2), ok: minD > 0.30 * 2 * 0.85 };
-  }
-
-  // Minions of a slain unique leader break and run.
-  {
-    const at = level.nearestOpen(player.x + 5, player.y, 8);
-    const pack = spawnPack(level, 'fallen', R, { at, count: 5, sheets: assets.figures, rank: 'unique', mlvl: 3 });
-    const leader = pack[0], minions = pack.slice(1);
-    for (const m of pack) m.state = 'chase';
-    leader.die();
-    for (let i = 0; i < 8; i++) for (const m of minions) updateAI(m, 1 / 60, aiCtx);
-    out.flee = { leaderRank: leader.rank, minions: minions.length, fleeing: minions.filter((m) => m.state === 'flee').length };
-    for (const m of pack) m.remove = true;
-    level.removeDead();
-  }
-
-  // A Shaman brings a Fallen corpse back.
-  {
-    const at = level.nearestOpen(player.x + 4, player.y + 4, 8);
-    const sh = new Monster('shaman', 4, { x: at.x, y: at.y, rng: R, sheet: assets.figures.shaman });
-    const corpse = new Monster('fallen', 3, { x: at.x + 1, y: at.y, rng: R, sheet: assets.figures.fallen });
-    level.addEntity(sh); level.addEntity(corpse);
-    corpse.die();
-    sh.state = 'chase'; sh.specialCool = 0;
-    const before = level.entities.filter((e) => e.alive && e.defId === 'fallen').length;
-    for (let i = 0; i < 120; i++) updateAI(sh, 1 / 60, aiCtx);
-    const after = level.entities.filter((e) => e.alive && e.defId === 'fallen').length;
-    out.resurrect = { before, after, worked: after > before, logTail: log.slice(-1) };
-    sh.remove = true; level.removeDead();
-  }
-
-  // A kill drops loot, and loot can be picked up.
-  {
-    const at = level.nearestOpen(player.x + 2, player.y, 6);
-    const m = new Monster('devilkin', 6, { x: at.x, y: at.y, rng: R, sheet: assets.figures.devilkin });
-    level.addEntity(m);
-    const itemsBefore = level.items.length;
-    m.die();
-    let drops = 0;
-    for (let i = 0; i < 60; i++) drops += dropLoot(level, m, player, R).length;
-    const goldBefore = player.gold, bagBefore = player.inventory.length;
-    let picked = 0;
-    for (const gi of level.items) if (!gi.taken && pickUp(player, gi)) picked++;
-    out.loot = {
-      dropsFrom60Kills: drops, itemsOnGround: level.items.length - itemsBefore,
-      pickedUp: picked, goldGained: player.gold - goldBefore,
-      bagGrewBy: player.inventory.length - bagBefore,
-    };
     m.remove = true; level.removeDead();
-  }
+    player.skills.firemastery = saved;
+    return +(total / 40).toFixed(2);
+  };
+  const noMastery = measure(0, 75);
+  const withMastery = measure(12, 75);
 
-  return out;
+  return {
+    perSkill: results,
+    allCast: results.every((r) => r.cast === 'ok'),
+    manaCorrect: results.every((r) => Math.abs(r.manaSpent - r.expectedMana) < 0.15),
+    allDamaging: results.filter((r) => !['Teleport'].includes(r.skill)).every((r) => r.damaged > 0),
+    teleport: { attempts, landedInWall: intoWall },
+    mastery: { pierce: pierceTable(player), avgNoMastery: noMastery, avgWithMastery: withMastery, improved: withMastery > noMastery },
+  };
 };
 
-Object.defineProperty(window, '__dbg', { get: () => ({ player, level, fx, aiCtx, log, stubbedShots }) });
+window.__setArea = (i) => { areaIdx = i; build(); return level.name; };
+window.__render = render;
+Object.defineProperty(window, '__dbg', { get: () => ({ player, level, fx, gctx, projectiles }) });
 window.__loop = startLoop({ step, draw });
