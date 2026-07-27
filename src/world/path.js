@@ -138,13 +138,18 @@ export function findPath(level, sx, sy, tx, ty, maxNodes = 6000) {
   }
   out.reverse();
   out.shift();                       // drop the tile already stood on
-  if (out.length) out[out.length - 1] = { x: tx, y: ty };
+  // Finish on the exact point asked for, but only when it is actually
+  // standable. Clicking into a wall is routine, and substituting it blindly
+  // leaves a final waypoint nobody can ever reach.
+  if (out.length && level.walkableTile(Math.floor(tx), Math.floor(ty))) {
+    out[out.length - 1] = { x: tx, y: ty };
+  }
   return out;
 }
 
 // Supercover line test: walks every tile the segment touches, so a wall corner
 // clipped by the line counts as blocking.
-export function hasLineOfSight(level, ax, ay, bx, by) {
+function losRay(level, ax, ay, bx, by) {
   let x = Math.floor(ax), y = Math.floor(ay);
   const ex = Math.floor(bx), ey = Math.floor(by);
   const dx = bx - ax, dy = by - ay;
@@ -165,16 +170,35 @@ export function hasLineOfSight(level, ax, ay, bx, by) {
   return true;
 }
 
+// Line of sight for a body of a given width.
+//
+// A bare centre-line test is only correct for a point. The A* path itself is
+// safe because it steps tile centre to tile centre and refuses to cut corners,
+// but smoothing replaces it with a straight line, and a line that is clear at
+// tile granularity can still graze a wall corner that a circle cannot fit past.
+// Testing the centre plus both edges of the body is what keeps the shortcut
+// walkable.
+export function hasLineOfSight(level, ax, ay, bx, by, radius = 0) {
+  if (!losRay(level, ax, ay, bx, by)) return false;
+  if (radius <= 0) return true;
+  const dx = bx - ax, dy = by - ay;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return true;
+  const px = (-dy / len) * radius, py = (dx / len) * radius;
+  return losRay(level, ax + px, ay + py, bx + px, by + py)
+      && losRay(level, ax - px, ay - py, bx - px, by - py);
+}
+
 // Drop every waypoint that the one before it can already see.
-export function smooth(level, path, from) {
+export function smooth(level, path, from, radius = 0) {
   if (!path || path.length < 2) return path;
   const out = [];
   let anchor = from;
   let i = 0;
   while (i < path.length) {
     let j = path.length - 1;
-    // Furthest visible point wins; walk back until one is reachable.
-    while (j > i && !hasLineOfSight(level, anchor.x, anchor.y, path[j].x, path[j].y)) j--;
+    // Furthest reachable point wins; walk back until one fits.
+    while (j > i && !hasLineOfSight(level, anchor.x, anchor.y, path[j].x, path[j].y, radius)) j--;
     out.push(path[j]);
     anchor = path[j];
     if (j === path.length - 1) break;

@@ -19,8 +19,8 @@ every sprite, tile, item icon and sound effect is computed at load time.
 | 4 | Tiles, props, particles, loading | done | No tile seams, no visible repetition, all effects fire |
 | 5 | Level generators and pathing | done | 6 areas, zero orphan tiles, everything reachable |
 | 6 | Renderer and lighting | done | Occlusion correct; 1.8ms median, 5.9ms worst frame |
-| 7 | Player, movement, combat formulas | in progress | |
-| 8 | Items | pending | |
+| 7 | Player, movement, combat formulas | done | 24/24 formula checks; 60/60 walks arrive, 0 stuck |
+| 8 | Items | in progress | |
 | 9 | Monsters and AI | pending | |
 | 10 | Skills and projectiles | pending | |
 | 11 | HUD, panels, tooltips | pending | |
