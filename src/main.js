@@ -1,184 +1,106 @@
-// Phase 4 harness: chunked loading screen, then a tile and prop field with
-// live particle effects. Replaced by the real state machine in a later task.
+// Phase 5 harness: generates all six areas, verifies connectivity by flood
+// fill, and draws a debug map of each. Replaced by the real state machine in a
+// later task.
 
-import { startLoop } from './core/loop.js';
-import { Camera } from './core/iso.js';
-import { Input } from './core/input.js';
-import { bakeTiles, getGround, getWall, getProp, TERRAIN } from './art/tiles.js';
-import { bakeAllFigures } from './art/figures.js';
-import { Particles, FX } from './art/fx.js';
+import { AREAS } from './world/levels.js';
+import { generate } from './world/gen.js';
+import { floodRegion, FLOOR, PATH, WALL } from './world/level.js';
+import { findPath, smooth } from './world/path.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const cam = new Camera();
-Input.attach(canvas);
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+ctx.imageSmoothingEnabled = false;
 
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  cam.resize(canvas.width, canvas.height);
-  cam.zoom = 1;
-  ctx.imageSmoothingEnabled = false;
-}
-window.addEventListener('resize', resize);
-resize();
+const SEED = 20260728;
+const report = [];
+const levels = [];
 
-// ------------------------------------------------------------ loading screen
+for (let i = 0; i < AREAS.length; i++) {
+  const def = AREAS[i];
+  const t0 = performance.now();
+  const lv = generate(def, SEED + i * 7919);
+  const ms = Math.round(performance.now() - t0);
+  levels.push(lv);
 
-const assets = { figures: {} };
-let loadDone = false, loadLabel = '', loadPct = 0, loadStart = performance.now(), loadMs = 0;
+  const region = floodRegion(lv, Math.floor(lv.start.x), Math.floor(lv.start.y));
+  const reach = new Uint8Array(lv.w * lv.h);
+  for (const j of region) reach[j] = 1;
 
-function* allBakers() {
-  yield* bakeTiles();
-  yield* bakeAllFigures(assets.figures);
-}
-const baker = allBakers();
-let steps = 0;
-const TOTAL_STEPS = 7 + 7 + 12 + 11; // ground, walls, props, figures
+  let floorTotal = 0;
+  for (let k = 0; k < lv.tiles.length; k++) if (lv.tiles[k] === FLOOR || lv.tiles[k] === PATH) floorTotal++;
 
-function pumpLoading() {
-  const budget = performance.now() + 10;
-  while (performance.now() < budget) {
-    const r = baker.next();
-    if (r.done) { loadDone = true; loadMs = Math.round(performance.now() - loadStart); return; }
-    steps++;
-    loadLabel = r.value.label || '';
-    loadPct = Math.min(1, steps / TOTAL_STEPS);
-  }
-}
+  const idx = (p) => Math.floor(p.y) * lv.w + Math.floor(p.x);
+  const exitsOk = lv.exits.every((e) => reach[idx(e)]);
+  const spawnsOk = lv.spawnPoints.every((s) => reach[idx(s)]);
+  const bossOk = lv.bossPoint ? !!reach[idx(lv.bossPoint)] : null;
+  const wpOk = lv.waypoint ? !!reach[idx(lv.waypoint)] : null;
+  const orphan = floorTotal - region.length;
 
-// Verification hook: a backgrounded tab throttles requestAnimationFrame to
-// roughly one frame a second, which makes the chunked loader take a minute to
-// finish under automation. This drains it in one go.
-window.__forceLoad = () => {
-  while (!loadDone) {
-    const r = baker.next();
-    if (r.done) { loadDone = true; loadMs = Math.round(performance.now() - loadStart); break; }
-    steps++;
-    loadPct = Math.min(1, steps / TOTAL_STEPS);
-  }
-  return loadMs;
-};
-
-function drawLoading() {
-  ctx.fillStyle = '#0b0a0e';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const w = Math.min(420, canvas.width - 80);
-  const x = (canvas.width - w) / 2, y = canvas.height / 2;
-  ctx.fillStyle = '#c8b070';
-  ctx.font = '22px Georgia, serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('Sanctuary', canvas.width / 2, y - 40);
-  ctx.font = '12px Georgia, serif';
-  ctx.fillStyle = '#6a6050';
-  ctx.fillText(loadLabel, canvas.width / 2, y - 14);
-  ctx.textAlign = 'left';
-  ctx.strokeStyle = '#4a4235';
-  ctx.strokeRect(x + 0.5, y + 0.5, w, 12);
-  ctx.fillStyle = '#8a6a2a';
-  ctx.fillRect(x + 2, y + 2, (w - 4) * loadPct, 9);
-}
-
-// -------------------------------------------------------------- demo content
-
-const fx = new Particles();
-const GRID = 30;
-const terrains = Object.keys(TERRAIN);
-let scene = null;
-
-function buildScene() {
-  const props = [];
-  const names = ['tree', 'rock', 'column', 'brazier', 'torch', 'barrel', 'chest', 'gravestone', 'bones', 'waypoint', 'portal', 'stairs'];
-  names.forEach((n, i) => {
-    props.push({ name: n, seed: i, x: 4 + (i % 6) * 4, y: 4 + Math.floor(i / 6) * 5 });
-  });
-  const walls = [];
-  for (let i = 0; i < GRID; i++) {
-    walls.push({ x: i, y: 0 });
-    walls.push({ x: 0, y: i });
-  }
-  for (let i = 10; i < 18; i++) walls.push({ x: i, y: 14 });
-  scene = { props, walls };
-  cam.x = 12; cam.y = 12;
-}
-
-function terrainAt(x, y) {
-  const qx = Math.floor(x / 10), qy = Math.floor(y / 10);
-  return terrains[Math.abs(qx * 3 + qy) % terrains.length];
-}
-
-let emitT = 0;
-
-function step(dt) {
-  if (!loadDone) return;
-  if (!scene) buildScene();
-
-  const w = cam.toWorld(Input.mouse.x, Input.mouse.y);
-  emitT -= dt;
-  if (emitT <= 0) {
-    emitT = 0.55;
-    const pick = Math.floor(Math.random() * 5);
-    if (pick === 0) FX.fireBurst(fx, w.x, w.y, 2.4);
-    else if (pick === 1) FX.iceBurst(fx, w.x, w.y, 2.2);
-    else if (pick === 2) FX.lightBurst(fx, w.x, w.y, 2.6);
-    else if (pick === 3) FX.hitBlood(fx, w.x, w.y);
-    else FX.levelUp(fx, w.x, w.y);
-  }
-  fx.update(dt);
-
-  const sp = 7 * dt;
-  if (Input.down('KeyW')) { cam.x -= sp; cam.y -= sp; }
-  if (Input.down('KeyS')) { cam.x += sp; cam.y += sp; }
-  if (Input.down('KeyA')) { cam.x -= sp; cam.y += sp; }
-  if (Input.down('KeyD')) { cam.x += sp; cam.y -= sp; }
-  Input.endFrame();
-}
-
-function draw(fps) {
-  if (!loadDone) { pumpLoading(); drawLoading(); return; }
-  if (!scene) return;
-
-  ctx.fillStyle = '#08070b';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const b = cam.visibleTileBounds();
-  for (let y = Math.max(0, b.y0); y <= Math.min(GRID - 1, b.y1); y++) {
-    for (let x = Math.max(0, b.x0); x <= Math.min(GRID - 1, b.x1); x++) {
-      const s = cam.toScreen(x, y);
-      ctx.drawImage(getGround(terrainAt(x, y), x, y), s.x - 32, s.y - 16);
-    }
-  }
-
-  fx.drawDecals(ctx, cam);
-
-  // Depth-sorted overlay of walls and props.
-  const draws = [];
-  for (const w of scene.walls) draws.push({ d: w.x + w.y, kind: 'wall', o: w });
-  for (const p of scene.props) draws.push({ d: p.x + p.y, kind: 'prop', o: p });
-  draws.sort((p, q) => p.d - q.d);
-  for (const it of draws) {
-    const s = cam.toScreen(it.o.x, it.o.y);
-    if (it.kind === 'wall') {
-      const wl = getWall(terrainAt(it.o.x, it.o.y), it.o.x, it.o.y);
-      ctx.drawImage(wl.canvas, s.x - wl.ox, s.y - wl.oy);
-    } else {
-      const pr = getProp(it.o.name, it.o.seed);
-      if (pr) ctx.drawImage(pr.canvas, s.x - pr.ox, s.y - pr.oy);
-    }
-  }
-
-  fx.draw(ctx, cam);
-
-  ctx.fillStyle = '#a89868';
-  ctx.font = '13px Georgia, serif';
-  ctx.fillText(`fps ${fps}   bake ${loadMs}ms   particles ${fx.p.length}   WASD to pan, mouse aims effects`, 12, 20);
-  scene.props.forEach((p) => {
-    const s = cam.toScreen(p.x, p.y);
-    ctx.fillStyle = 'rgba(255,220,120,0.75)';
-    ctx.fillRect(s.x - 1, s.y - 1, 2, 2);
+  report.push({
+    id: def.id, ms, size: `${lv.w}x${lv.h}`, floor: floorTotal,
+    orphanTiles: orphan, exits: lv.exits.length, exitsOk,
+    spawns: lv.spawnPoints.length, spawnsOk, bossOk, wpOk, props: lv.props.length,
   });
 }
 
-window.__loop = startLoop({ step, draw });
-window.__fx = fx;
-window.__cam = cam;
+// Path smoothing check: a route across the largest area should end up with far
+// fewer waypoints than tiles travelled.
+const moor = levels[1];
+const far = moor.spawnPoints[moor.spawnPoints.length - 1] || moor.exits[1];
+const raw = findPath(moor, moor.start.x, moor.start.y, far.x, far.y);
+const sm = raw ? smooth(moor, raw, moor.start) : null;
+console.table(report);
+console.log('[path] raw waypoints', raw ? raw.length : 'NO PATH', '-> smoothed', sm ? sm.length : '-');
+window.__report = { report, path: { raw: raw && raw.length, smooth: sm && sm.length } };
+
+// ------------------------------------------------------------------ drawing
+
+const COLS = 3;
+const cellW = Math.floor(canvas.width / COLS);
+const cellH = Math.floor((canvas.height - 20) / 2);
+
+ctx.fillStyle = '#0a090d';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.font = '12px Georgia, serif';
+
+levels.forEach((lv, i) => {
+  const ox = (i % COLS) * cellW + 8;
+  const oy = Math.floor(i / COLS) * cellH + 22;
+  const s = Math.max(1, Math.floor(Math.min((cellW - 16) / lv.w, (cellH - 34) / lv.h)));
+
+  const region = floodRegion(lv, Math.floor(lv.start.x), Math.floor(lv.start.y));
+  const reach = new Uint8Array(lv.w * lv.h);
+  for (const j of region) reach[j] = 1;
+
+  for (let y = 0; y < lv.h; y++) {
+    for (let x = 0; x < lv.w; x++) {
+      const t = lv.tiles[y * lv.w + x];
+      let c = '#111016';
+      if (t === WALL) c = '#2e2b33';
+      else if (t === PATH) c = '#7a6440';
+      else if (t === FLOOR) c = reach[y * lv.w + x] ? '#3f5a3a' : '#8a2a2a';
+      if (t !== WALL && lv.solid[y * lv.w + x]) c = '#4a4030';
+      ctx.fillStyle = c;
+      ctx.fillRect(ox + x * s, oy + y * s, s, s);
+    }
+  }
+
+  const dot = (p, col, r = 2) => {
+    ctx.fillStyle = col;
+    ctx.fillRect(ox + p.x * s - r, oy + p.y * s - r, r * 2, r * 2);
+  };
+  for (const sp of lv.spawnPoints) dot(sp, 'rgba(200,120,220,0.8)', 1);
+  for (const e of lv.exits) dot(e, '#ffd24a', 3);
+  if (lv.waypoint) dot(lv.waypoint, '#b070ff', 3);
+  if (lv.bossPoint) dot(lv.bossPoint, '#ff3a2a', 4);
+  dot(lv.start, '#7ad0ff', 3);
+
+  const r = report[i];
+  ctx.fillStyle = r.exitsOk && r.spawnsOk && r.bossOk !== false ? '#a89868' : '#ff5a4a';
+  ctx.fillText(`${lv.name}  ${r.size}  ${r.ms}ms  floor ${r.floor}  orphans ${r.orphanTiles}  props ${r.props}`, ox, oy - 6);
+});
+
+ctx.fillStyle = '#6a6050';
+ctx.fillText('blue = start, yellow = exit, purple ring = waypoint, red = boss, small purple = spawn, red floor = unreachable', 8, canvas.height - 6);
