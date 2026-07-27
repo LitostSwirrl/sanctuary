@@ -3,7 +3,7 @@
 Browser action-RPG in the shape of Diablo 2. No image, audio or font files ship with it —
 every sprite, tile, item icon and sound effect is computed at load time.
 
-**Run it:** `python3 -m http.server 8231` then open `http://localhost:8231/index.html`
+**Run it:** `node serve.js` then open `http://localhost:8231/index.html`
 
 - Spec: `docs/superpowers/specs/2026-07-28-diablo-vertical-slice-design.md`
 - Plan: `docs/superpowers/plans/2026-07-28-diablo-vertical-slice.md`
@@ -21,8 +21,8 @@ every sprite, tile, item icon and sound effect is computed at load time.
 | 6 | Renderer and lighting | done | Occlusion correct; 1.8ms median, 5.9ms worst frame |
 | 7 | Player, movement, combat formulas | done | 24/24 formula checks; 60/60 walks arrive, 0 stuck |
 | 8 | Items | done | 12k rolls: 0 rule violations; unique 0.61% at ilvl 12; MF works |
-| 9 | Monsters and AI | in progress | |
-| 10 | Skills and projectiles | pending | |
+| 9 | Monsters and AI | done | wake, separation, hit-frame, flee, resurrect, loot all verified |
+| 10 | Skills and projectiles | in progress | |
 | 11 | HUD, panels, tooltips | pending | |
 | 12 | Audio | pending | |
 | 13 | Assembly, quests, bosses, save | pending | |
@@ -55,3 +55,5 @@ reachable from the entrance.
 - `shift()` in `art/palette.js` returns a packed integer, not a hex string. Do not pass its
   result to `packHex()`.
 - Sprite directions 3, 4 and 7 are horizontal flips of 1, 0 and 5, applied at draw time.
+- Serve with `node serve.js` (not `python3 -m http.server`). It sends no-store, and a
+  cached ES module once made a real fix look like it had failed.

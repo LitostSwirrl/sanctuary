@@ -71,24 +71,25 @@ export class Entity {
     const frames = ANIMS[this.animName] || 4;
     this.animTime += dt * this.animFps;
     let f = Math.floor(this.animTime);
+    const reachedEnd = f >= frames;
 
-    if (this.hitFrame >= 0 && !this.hitFired && f >= this.hitFrame) {
+    if (reachedEnd) {
+      if (this.animLoop) { this.animTime -= frames; f = Math.floor(this.animTime); }
+      else f = frames - 1;
+    }
+    // Publish the frame before firing callbacks. A hit callback that inspects
+    // the entity — for a spawn position, a facing, an effect — must see the
+    // frame the blow actually landed on, not the one before it.
+    this.frame = f;
+
+    if (this.hitFrame >= 0 && !this.hitFired && (f >= this.hitFrame || reachedEnd)) {
       this.hitFired = true;
       if (this.onHitFrame) this.onHitFrame();
     }
-    if (f >= frames) {
-      if (this.animLoop) {
-        this.animTime -= frames;
-        f = Math.floor(this.animTime);
-      } else {
-        f = frames - 1;
-        if (!this.animEnded) {
-          this.animEnded = true;
-          if (this.onAnimEnd) this.onAnimEnd();
-        }
-      }
+    if (reachedEnd && !this.animLoop && !this.animEnded) {
+      this.animEnded = true;
+      if (this.onAnimEnd) this.onAnimEnd();
     }
-    this.frame = f;
   }
 
   face(tx, ty) {
