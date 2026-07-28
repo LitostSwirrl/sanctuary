@@ -9,7 +9,7 @@
 - **Plan** — `docs/superpowers/plans/2026-07-29-barbarian-class.md`: done, self-reviewed, committed (2026-07-29)
 - **Task 1 — The Barbarian figure**: done (2026-07-29, commit 272e7d9)
 - **Task 2 — Class data and plumbing**: done (2026-07-29, commit 4ab59fd)
-- **Task 3 — Class select on the title**: pending
+- **Task 3 — Class select on the title**: done (2026-07-29, commit 79fcb99)
 - **Task 4 — Melee skill path + Combat strikes**: pending
 - **Task 5 — Leap and Whirlwind**: pending
 - **Task 6 — Monster status + Warcries**: pending
@@ -59,6 +59,14 @@ Execution mode: **subagent-driven** (decided 2026-07-29). First execution resume
 **Why**: A Barbarian is now fully playable through `__newGame('barbarian')` — 55/10 orbs, Hand Axe swings kill moor monsters, three named empty tree columns, class greetings — with the Sorceress regression-checked (Fire Bolt, FCR row, her three columns). Console clean both passes.
 
 **Next**: Task 3 (class select on the title). Deferred minor on record: `CLASS_TREES[player.cls]` unguarded (plan-mandated; matters only if a third class lands).
+
+### Task 3 — Class select on the title (2026-07-29)
+
+**What**: `titleStep` state, the two-card `drawClassSelect` (hard-pixel idle portraits, hover highlight, flavour lines), input routing (New Game opens the class step; Continue never asks), Esc back, and the `titleStep = 'menu'` resets in both `newGame` and `continueGame` — commit `79fcb99`, src/main.js only. Review Approved: click rects provably identical to drawn rects, Continue structurally cannot reach class select, Esc handling matches the dead-state convention, and the portrait draw's flip omission was independently confirmed correct against `figures.js` (`index(anim, dir, frame)`, dir 2 unmirrored).
+
+**Why**: The title is where a second class becomes visible; both classes are now creatable in-game end to end (card click → spawn → save → reload → Continue restores the Barbarian without asking).
+
+**Next**: Task 4 (melee skill path + Bash / Double Swing / Concentrate).
 
 ---
 
