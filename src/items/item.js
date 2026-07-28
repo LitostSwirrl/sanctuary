@@ -148,6 +148,9 @@ export function rollItem(rng, ilvl, opts = {}) {
     req: { str: base.req.str, dex: base.req.dex },
     twoHand: !!base.twoHand,
     caster: !!base.caster,
+    // Rares and uniques come out of the ground nameless, as in the original.
+    // Everything else is plain enough to read at a glance.
+    identified: opts.identified ?? !(rarity === 'rare' || rarity === 'unique'),
   };
 
   if (base.dmg) {
@@ -225,11 +228,23 @@ export function priceOf(item) {
 
 // ------------------------------------------------------------- presentation
 
+// Until it is identified an item is known only by its base type.
+export function itemName(item) {
+  if (item.identified === false && item.base) return item.base.name;
+  return item.name;
+}
+
+export function identify(item) {
+  if (!item || item.identified !== false) return false;
+  item.identified = true;
+  return true;
+}
+
 // Tooltip lines. `player` is optional; when given, unmet requirements go red.
 export function describe(item, player) {
   const lines = [];
   const colour = RARITY_COLOUR[item.rarity] || RARITY_COLOUR.normal;
-  lines.push({ text: item.name, colour, header: true });
+  lines.push({ text: itemName(item), colour, header: true });
 
   if (item.gold) return lines;
   if (item.potion) {
@@ -261,6 +276,12 @@ export function describe(item, player) {
     lines.push({ text: `Required Dexterity: ${req.dex}`, colour: unmet ? '#ff5a4a' : '#a89f88' });
   }
 
+  if (item.identified === false) {
+    lines.push({ text: 'Unidentified', colour: '#ff5a4a' });
+    lines.push({ text: 'Deckard Cain will name it for you.', colour: '#8a7f6a', italic: true });
+    return lines;
+  }
+
   // Elemental damage first, then flat modifiers.
   for (const el of ['fire', 'cold', 'light', 'pois']) {
     const [kMin, kMax] = ELEMENT_MODS[el];
@@ -281,6 +302,7 @@ export function describe(item, player) {
 }
 
 export function canEquip(player, item) {
+  if (item.identified === false) return false;
   const req = item.req || { str: 0, dex: 0 };
   return player.effective.str >= req.str && player.effective.dex >= req.dex;
 }

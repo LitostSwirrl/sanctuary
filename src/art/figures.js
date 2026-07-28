@@ -658,6 +658,86 @@ export const FIGURE_SPECS = {
     build: { ...DEFAULT_BUILD, torsoR: 6.0, shoulder: 9.5 },
   }),
 
+  // The encampment. Townsfolk only ever stand and breathe, so one animation is
+  // all they cost.
+  akara: humanoid({
+    palette: {
+      skin: '#e0bd9c', cloth: '#d8cfae', cloth2: '#b3a683', trim: COLORS.gold,
+      hair: '#cfc7bb', metal: COLORS.gold, wood: COLORS.wood, gem: COLORS.arcane,
+      cape: '#c2b691', boot: COLORS.leather,
+    },
+    scale: 0.96,
+    parts: { robe: true, hood: true, cape: true, belt: true },
+    weapon: 'staff',
+    anims: ['idle'],
+    build: { ...DEFAULT_BUILD, torsoR: 6.4, headR: 6.5, hunch: 0.12 },
+  }),
+
+  charsi: humanoid({
+    palette: {
+      skin: '#d9a173', cloth: '#6d4326', cloth2: '#4d3a2a', trim: '#8a6a3a',
+      hair: '#3a2418', metal: COLORS.steel, wood: COLORS.wood, gem: COLORS.ember,
+      boot: COLORS.leather,
+    },
+    scale: 1.0,
+    parts: { hair: true, bareArms: true, belt: true },
+    weapon: 'club',
+    anims: ['idle'],
+    build: { ...DEFAULT_BUILD, shoulder: 11, torsoR: 6.8, armR: 3.4, headR: 6.4 },
+  }),
+
+  gheed: humanoid({
+    palette: {
+      skin: '#c99a6a', cloth: '#5d2f6a', cloth2: '#7a4a2a', trim: COLORS.gold,
+      hair: '#241a14', metal: COLORS.gold, wood: COLORS.wood, gem: COLORS.gold,
+      cape: '#4a2456', boot: COLORS.leather,
+    },
+    scale: 0.9,
+    parts: { robe: true, cape: true, hair: true, belt: true },
+    weapon: 'none',
+    anims: ['idle'],
+    build: { ...DEFAULT_BUILD, torsoR: 8.2, shoulder: 10, headR: 6.8, hunch: 0.2 },
+  }),
+
+  cain: humanoid({
+    palette: {
+      skin: '#d8b294', cloth: '#4a4a52', cloth2: '#35353c', trim: '#8a7f6a',
+      hair: '#e2ded4', metal: COLORS.darkSteel, wood: COLORS.wood, gem: COLORS.arcane,
+      cape: '#3d3d45', boot: COLORS.leather,
+    },
+    scale: 0.93,
+    parts: { robe: true, cape: true, hair: true, belt: true },
+    weapon: 'staff',
+    anims: ['idle'],
+    build: { ...DEFAULT_BUILD, torsoR: 5.6, shoulder: 8.4, headR: 6.4, hunch: 0.4 },
+  }),
+
+  kashya: humanoid({
+    palette: {
+      skin: '#a8724a', cloth: '#3f5a3a', cloth2: COLORS.leather, trim: '#8a6a3a',
+      hair: '#1e1a18', metal: COLORS.darkSteel, wood: COLORS.wood, gem: COLORS.blood,
+      cape: '#33482f', boot: COLORS.leather,
+    },
+    scale: 0.97,
+    parts: { cape: true, hair: true, bareArms: true, belt: true },
+    weapon: 'bow',
+    anims: ['idle'],
+    build: { ...DEFAULT_BUILD, shoulder: 9.4, torsoR: 6.0, headR: 6.4 },
+  }),
+
+  warriv: humanoid({
+    palette: {
+      skin: '#b8794a', cloth: '#8a5a2a', cloth2: '#5a3f22', trim: COLORS.gold,
+      hair: '#2a1c14', metal: COLORS.darkSteel, wood: COLORS.wood, gem: COLORS.ember,
+      cape: '#7a4e26', boot: COLORS.leather,
+    },
+    scale: 0.98,
+    parts: { robe: true, hood: true, cape: true, belt: true },
+    weapon: 'none',
+    anims: ['idle'],
+    build: { ...DEFAULT_BUILD, torsoR: 6.8, shoulder: 10, headR: 6.5 },
+  }),
+
   andariel: humanoid({
     palette: {
       skin: COLORS.andarielSkin, cloth: COLORS.andarielCarapace, cloth2: '#4a1a26',
@@ -672,6 +752,8 @@ export const FIGURE_SPECS = {
     build: { ...DEFAULT_BUILD, torsoR: 6.2, shoulder: 10.5, headR: 6.8, hunch: 0.1 },
   }),
 };
+
+export const FIGURE_BAKE_STEPS = Object.keys(FIGURE_SPECS).length;
 
 // Bake every figure, yielding between animations so the loading screen can
 // keep painting instead of the tab locking up.

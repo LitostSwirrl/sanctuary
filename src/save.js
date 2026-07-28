@@ -19,6 +19,9 @@ function packItem(it) {
     m: it.mods, a: it.affixes,
     dn: it.minDmg, dx: it.maxDmg, d: it.defense, bl: it.block,
     rq: it.req, pr: it.price, f: it.flavour,
+    // 0 means still unidentified. An older save without the field reads as
+    // identified, which is the harmless direction to be wrong in.
+    id: it.identified === false ? 0 : 1,
   };
 }
 
@@ -45,6 +48,7 @@ function unpackItem(o, nextUid) {
     mods: o.m || {}, affixes: o.a || [],
     minDmg: o.dn, maxDmg: o.dx, defense: o.d, block: o.bl,
     req: o.rq || { str: 0, dex: 0 }, price: o.pr, flavour: o.f,
+    identified: o.id !== 0,
   };
 }
 
