@@ -4,10 +4,10 @@
 // every clickable rectangle is. Layout is recomputed each frame from the canvas
 // size, so nothing here caches positions that could go stale on a resize.
 
-import { panel, panelTitle, drawTooltip } from './tooltip.js';
-import { skillIcon } from './hud.js';
-import { GRID_W, GRID_H, POTIONS } from '../items/bases.js';
-import { describe, RARITY_COLOUR, canEquip, rollItem, makePotion } from '../items/item.js';
+import { panel, panelTitle, drawTooltip, wrapText } from './tooltip.js';
+import { skillIcon, HUD_H } from './hud.js';
+import { GRID_W, GRID_H, POTIONS, BASES } from '../items/bases.js';
+import { describe, RARITY_COLOUR, canEquip, rollItem, makePotion, itemName, identify } from '../items/item.js';
 import { iconFor, ICON_CELL } from '../art/icons.js';
 import { fits, addToInventory, removeFromInventory, sellValue, groundItem } from '../game/loot.js';
 import {
@@ -48,6 +48,9 @@ export class UI {
     this.hitAreas = [];
     this.tooltip = null;
     this.vendorStock = null;
+    this.pickerSide = 'right'; // which mouse button the skill picker is binding
+    this.npc = null;           // whoever is being spoken to
+    this.npcSaid = null;       // the line currently on screen
     this.message = null;
     this.messageT = 0;
   }
@@ -55,8 +58,23 @@ export class UI {
   toggle(which) {
     this.open = this.open === which ? null : which;
     if (this.open !== 'vendor') this.vendorStock = null;
+    if (this.open !== 'talk' && this.open !== 'vendor' && this.open !== 'gamble') this.npc = null;
   }
-  closeAll() { this.open = null; }
+  closeAll() { this.open = null; this.npc = null; }
+
+  // Walking up to someone opens their greeting, not their shop.
+  talkTo(npc) {
+    this.npc = npc;
+    this.npcSaid = npc.greeting || npc.def.greeting;
+    this.open = 'talk';
+  }
+
+  // The two skill buttons on the bar open this, one per mouse button.
+  openPicker(side) {
+    if (this.open === 'skillpicker' && this.pickerSide === side) { this.open = null; return; }
+    this.pickerSide = side;
+    this.open = 'skillpicker';
+  }
 
   say(text, seconds = 2.2) { this.message = text; this.messageT = seconds; }
 
@@ -90,6 +108,9 @@ export class UI {
     if (this.open === 'skills') this.drawSkills(ctx, player, L, mx, my);
     if (this.open === 'vendor') this.drawVendor(ctx, player, L, mx, my, opts);
     if (this.open === 'waypoint') this.drawWaypoint(ctx, player, L, mx, my, opts);
+    if (this.open === 'skillpicker') this.drawSkillPicker(ctx, player, L, mx, my);
+    if (this.open === 'talk') this.drawTalk(ctx, player, L, mx, my);
+    if (this.open === 'gamble') this.drawGamble(ctx, player, L, mx, my);
 
     if (this.drag) {
       const ic = iconFor(this.drag.item);
@@ -388,24 +409,38 @@ export class UI {
 
   // ------------------------------------------------------------------ vendor
 
-  ensureStock(rng, areaLevel) {
-    if (this.vendorStock) return this.vendorStock;
+  // Each merchant keeps their own stock for the session, drawn from the base
+  // types they deal in. Everything a shop sells is already identified.
+  ensureStock(rng, areaLevel, npc) {
+    const holder = npc || this;
+    if (holder.stock || holder.vendorStock) return holder.stock || holder.vendorStock;
+    const slots = npc && npc.def.stockSlots;
     const stock = [];
     for (const p of POTIONS.filter((q) => q.tier <= 2)) stock.push(makePotion(p.id));
-    for (let i = 0; i < 8; i++) {
-      const it = rollItem(rng, Math.max(3, areaLevel + 2), { rarity: rng.chance(0.35) ? 'magic' : 'normal' });
-      if (it) stock.push(it);
+    for (let i = 0; i < 10; i++) {
+      const slot = slots && slots.length ? slots[rng.i(slots.length)] : null;
+      const it = rollItem(rng, Math.max(3, areaLevel + 2), {
+        slot, identified: true,
+        rarity: rng.chance(0.35) ? 'magic' : 'normal',
+      });
+      if (!it) continue;
+      if (npc && npc.def.stockCaster && it.slot === 'weapon' && !it.caster) continue;
+      stock.push(it);
     }
-    this.vendorStock = stock;
+    if (npc) npc.stock = stock; else this.vendorStock = stock;
     return stock;
+  }
+
+  vendorStockList() {
+    return (this.npc && this.npc.stock) || this.vendorStock || [];
   }
 
   drawVendor(ctx, player, L, mx, my) {
     const { x, y, w, h } = L.leftPanel;
     const s = L.s;
     panel(ctx, x, y, w, h);
-    panelTitle(ctx, 'Trade', x, y, w, s);
-    const stock = this.vendorStock || [];
+    panelTitle(ctx, this.npc ? this.npc.name : 'Trade', x, y, w, s);
+    const stock = this.vendorStockList();
 
     ctx.font = `${Math.round(12 * s)}px Georgia, serif`;
     ctx.fillStyle = '#9a9078';
@@ -422,7 +457,7 @@ export class UI {
       ctx.drawImage(ic, rect.x + 3 * s, rect.y + (rect.h - ic.height * sc) / 2, ic.width * sc, ic.height * sc);
       ctx.fillStyle = RARITY_COLOUR[it.rarity] || '#d6cdb4';
       ctx.font = `${Math.round(12 * s)}px Georgia, serif`;
-      ctx.fillText(it.name.slice(0, 28), rect.x + 34 * s, rect.y + 19 * s);
+      ctx.fillText(itemName(it).slice(0, 28), rect.x + 34 * s, rect.y + 19 * s);
       ctx.fillStyle = player.gold >= it.price ? '#ffd24a' : '#a05a4a';
       ctx.textAlign = 'right';
       ctx.fillText(String(it.price), rect.x + rect.w - 6 * s, rect.y + 19 * s);
@@ -430,6 +465,11 @@ export class UI {
       if (hovered && !this.drag) this.tooltip = describe(it, player);
       this.area(rect, 'buy', it);
       ty += 33 * s;
+    }
+
+    if (this.npc) {
+      this.buttonRow(ctx, [{ id: 'talk', label: 'Back' }, { id: 'leave', label: 'Leave' }],
+        { x, y, w, h }, s, mx, my, 'npcaction');
     }
   }
 
@@ -472,6 +512,186 @@ export class UI {
     ctx.textAlign = 'left';
   }
 
+  // ------------------------------------------------------------------- talk
+
+  talkRect(canvasW, canvasH, s) {
+    const w = Math.min(620 * s, canvasW - 60 * s);
+    const h = 210 * s;
+    return { x: canvasW / 2 - w / 2, y: canvasH - HUD_H * s - h - 24 * s, w, h };
+  }
+
+  // A row of buttons along the bottom of a panel. Returns nothing; each button
+  // registers its own hit area.
+  buttonRow(ctx, labels, R, s, mx, my, kind) {
+    const bw = (R.w - 24 * s - (labels.length - 1) * 8 * s) / labels.length;
+    labels.forEach((b, i) => {
+      const rect = { x: R.x + 12 * s + i * (bw + 8 * s), y: R.y + R.h - 46 * s, w: bw, h: 32 * s };
+      const hov = this.hovering(rect, mx, my);
+      ctx.fillStyle = hov ? 'rgba(96,82,44,0.85)' : 'rgba(0,0,0,0.5)';
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.strokeStyle = hov ? '#ffe08a' : 'rgba(140,120,70,0.6)';
+      ctx.lineWidth = 1.5 * s;
+      ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+      ctx.fillStyle = hov ? '#ffe08a' : '#c8b070';
+      ctx.font = `${Math.round(13 * s)}px Georgia, serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(b.label, rect.x + rect.w / 2, rect.y + 21 * s);
+      ctx.textAlign = 'left';
+      this.area(rect, kind, b.id);
+    });
+  }
+
+  actionsFor(npc) {
+    const acts = [{ id: 'talk', label: 'Talk' }];
+    if (npc.has('trade')) acts.push({ id: 'trade', label: 'Trade' });
+    if (npc.has('heal')) acts.push({ id: 'heal', label: 'Heal' });
+    if (npc.has('gamble')) acts.push({ id: 'gamble', label: 'Gamble' });
+    if (npc.has('identify')) acts.push({ id: 'identify', label: 'Identify' });
+    acts.push({ id: 'leave', label: 'Leave' });
+    return acts;
+  }
+
+  drawTalk(ctx, player, L, mx, my) {
+    const npc = this.npc;
+    if (!npc) { this.open = null; return; }
+    const s = L.s;
+    const R = this.talkRect(ctx.canvas.width, ctx.canvas.height, s);
+    panel(ctx, R.x, R.y, R.w, R.h);
+    panelTitle(ctx, npc.name, R.x, R.y, R.w, s);
+
+    ctx.font = `${Math.round(12 * s)}px Georgia, serif`;
+    ctx.fillStyle = '#8a7f6a';
+    ctx.textAlign = 'center';
+    ctx.fillText(npc.title, R.x + R.w / 2, R.y + 48 * s);
+    ctx.textAlign = 'left';
+
+    ctx.font = `${Math.round(14 * s)}px Georgia, serif`;
+    ctx.fillStyle = '#d6cdb4';
+    let ty = R.y + 76 * s;
+    for (const piece of wrapText(ctx, this.npcSaid || '', R.w - 44 * s)) {
+      ctx.fillText(piece, R.x + 22 * s, ty);
+      ty += 20 * s;
+    }
+
+    this.buttonRow(ctx, this.actionsFor(npc), R, s, mx, my, 'npcaction');
+  }
+
+  // ----------------------------------------------------------------- gamble
+
+  // Gheed sells the promise of an item, not the item: the roll happens on the
+  // click, so the price is what you know going in.
+  ensureGamble(rng, player, npc) {
+    if (npc.gambleStock) return npc.gambleStock;
+    const ilvl = Math.max(3, player.level + 2);
+    const pool = BASES.filter((b) => b.tier <= (player.level >= 12 ? 3 : player.level >= 6 ? 2 : 1));
+    const stock = [];
+    const used = new Set();
+    for (let i = 0; i < 8 && pool.length; i++) {
+      let b = pool[rng.i(pool.length)];
+      for (let guard = 0; guard < 8 && used.has(b.id); guard++) b = pool[rng.i(pool.length)];
+      used.add(b.id);
+      stock.push({ base: b, ilvl, price: Math.floor((260 + ilvl * 70) * (b.jewel ? 1.4 : 1)) });
+    }
+    npc.gambleStock = stock;
+    return stock;
+  }
+
+  drawGamble(ctx, player, L, mx, my) {
+    const npc = this.npc;
+    if (!npc) { this.open = null; return; }
+    const s = L.s;
+    const { x, y, w, h } = L.leftPanel;
+    panel(ctx, x, y, w, h);
+    panelTitle(ctx, 'Gamble', x, y, w, s);
+
+    ctx.font = `${Math.round(12 * s)}px Georgia, serif`;
+    ctx.fillStyle = '#9a9078';
+    ctx.fillText('Pay for the type. What you get is anyone\'s guess.', x + 16 * s, y + 50 * s);
+
+    let ty = y + 70 * s;
+    for (const g of npc.gambleStock || []) {
+      const rect = { x: x + 14 * s, y: ty, w: w - 28 * s, h: 30 * s };
+      const hovered = this.hovering(rect, mx, my);
+      ctx.fillStyle = hovered ? 'rgba(90,78,44,0.5)' : 'rgba(0,0,0,0.35)';
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.fillStyle = '#d6cdb4';
+      ctx.font = `${Math.round(12 * s)}px Georgia, serif`;
+      ctx.fillText(g.base.name, rect.x + 10 * s, rect.y + 19 * s);
+      ctx.fillStyle = player.gold >= g.price ? '#ffd24a' : '#a05a4a';
+      ctx.textAlign = 'right';
+      ctx.fillText(String(g.price), rect.x + rect.w - 8 * s, rect.y + 19 * s);
+      ctx.textAlign = 'left';
+      this.area(rect, 'gamble', g);
+      ty += 33 * s;
+    }
+
+    this.buttonRow(ctx, [{ id: 'talk', label: 'Back' }, { id: 'leave', label: 'Leave' }],
+      { x, y, w, h }, s, mx, my, 'npcaction');
+  }
+
+  // ----------------------------------------------------------- skill picker
+
+  // What either mouse button may be bound to: the plain attack, plus every
+  // non-passive skill with a point in it.
+  bindable(player) {
+    return ['attack', ...SKILLS.filter((sk) => !sk.passive && allocatedPoints(player, sk.id) > 0).map((sk) => sk.id)];
+  }
+
+  pickerRect(canvasW, canvasH, s, player) {
+    const n = this.bindable(player).length;
+    const cols = Math.min(6, n);
+    const rows = Math.ceil(n / cols);
+    const cell = 46 * s, pad = 8 * s;
+    const w = cols * (cell + pad) + pad;
+    const h = rows * (cell + pad) + pad + 46 * s;
+    return {
+      x: canvasW / 2 - w / 2, y: canvasH - HUD_H * s - h - 10 * s, w, h, cols, cell, pad,
+    };
+  }
+
+  drawSkillPicker(ctx, player, L, mx, my) {
+    const s = L.s;
+    const list = this.bindable(player);
+    const R = this.pickerRect(ctx.canvas.width, ctx.canvas.height, s, player);
+    panel(ctx, R.x, R.y, R.w, R.h);
+    panelTitle(ctx, this.pickerSide === 'left' ? 'Left Mouse Skill' : 'Right Mouse Skill', R.x, R.y, R.w, s);
+
+    const bound = this.pickerSide === 'left' ? player.leftSkill : player.rightSkill;
+    list.forEach((id, i) => {
+      const col = i % R.cols, row = (i / R.cols) | 0;
+      const rect = {
+        x: R.x + R.pad + col * (R.cell + R.pad),
+        y: R.y + 40 * s + R.pad + row * (R.cell + R.pad),
+        w: R.cell, h: R.cell,
+      };
+      const hovered = this.hovering(rect, mx, my);
+      ctx.fillStyle = hovered ? 'rgba(90,78,44,0.6)' : 'rgba(0,0,0,0.55)';
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      if (id === 'attack') {
+        ctx.fillStyle = '#c8b070';
+        ctx.font = `${Math.round(11 * s)}px Georgia, serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('Attack', rect.x + rect.w / 2, rect.y + rect.h / 2 + 4 * s);
+        ctx.textAlign = 'left';
+      } else {
+        const ic = skillIcon(id);
+        ctx.drawImage(ic, rect.x + (rect.w - ic.width * s) / 2, rect.y + (rect.h - ic.height * s) / 2,
+          ic.width * s, ic.height * s);
+      }
+      ctx.strokeStyle = id === bound ? '#ffb020' : hovered ? '#ffe08a' : 'rgba(140,120,70,0.55)';
+      ctx.lineWidth = 2 * s;
+      ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+
+      if (hovered && !this.drag) {
+        this.tooltip = id === 'attack'
+          ? [{ text: 'Attack', colour: '#ffe08a', header: true },
+             { text: 'Swing whatever is in your hand.', colour: '#a89f88', wrap: true }]
+          : describeSkill(player, id);
+      }
+      this.area(rect, 'bind', id);
+    });
+  }
+
   // ------------------------------------------------------------------- input
 
   // Returns true when the click belonged to the UI.
@@ -503,6 +723,37 @@ export class UI {
         return true;
       }
 
+      if (a.kind === 'npcaction' && button === 0) { this.npcAction(a.data, player, ctx); return true; }
+
+      if (a.kind === 'gamble' && button === 0) {
+        const g = a.data;
+        if (player.gold < g.price) { this.say('Not enough gold'); return true; }
+        // Gambling never returns a plain item — that is what the premium buys.
+        const roll = ctx.rng.f();
+        const it = rollItem(ctx.rng, g.ilvl, {
+          baseId: g.base.id, mf: player.magicFind,
+          rarity: roll < 0.02 ? 'unique' : roll < 0.14 ? 'rare' : 'magic',
+        });
+        if (!it) { this.say('Nothing came of it'); return true; }
+        if (!addToInventory(player, it)) { this.say('No room in your bag'); return true; }
+        player.gold -= g.price;
+        this.say(`${itemName(it)} — ${it.identified === false ? 'unidentified' : it.rarity}`);
+        if (ctx.sfx) ctx.sfx('gold');
+        // The wheel turns: that slot is spent, a new type takes its place.
+        const i = this.npc.gambleStock.indexOf(g);
+        if (i >= 0) this.npc.gambleStock.splice(i, 1);
+        return true;
+      }
+
+      if (a.kind === 'bind' && button === 0) {
+        if (this.pickerSide === 'left') player.leftSkill = a.data;
+        else player.rightSkill = a.data;
+        const name = a.data === 'attack' ? 'Attack' : SKILL_BY_ID[a.data].name;
+        this.say(`${name} bound to ${this.pickerSide} mouse`);
+        this.open = null;
+        return true;
+      }
+
       if (a.kind === 'buy' && button === 0) {
         const it = a.data;
         if (player.gold < it.price) { this.say('Not enough gold'); return true; }
@@ -512,21 +763,27 @@ export class UI {
         return true;
       }
 
-      if (a.kind === 'equip' && button === 0) {
+      if (a.kind === 'equip') {
         const cur = player.equipment[a.data];
-        if (this.drag) return this.dropOn(a, mx, my, player, ctx);
-        if (cur) {
-          if (this.open === 'vendor') {
-            player.gold += sellValue(cur);
-            player.equipment[a.data] = null;
-            player.recalc();
-            this.say(`Sold for ${sellValue(cur)} gold`);
-            return true;
-          }
+        if (this.drag) return button === 0 ? this.dropOn(a, mx, my, player, ctx) : true;
+        if (!cur) return true;
+        if (this.open === 'vendor' && button === 0) {
+          player.gold += sellValue(cur);
           player.equipment[a.data] = null;
           player.recalc();
-          this.drag = { item: cur, from: { kind: 'equip', slot: a.data } };
+          this.say(`Sold for ${sellValue(cur)} gold`);
+          return true;
         }
+        // Right click takes it off into the bag; left click picks it up to drag.
+        if (button === 2) {
+          if (!addToInventory(player, cur)) { this.say('No room in your bag'); return true; }
+          player.equipment[a.data] = null;
+          player.recalc();
+          return true;
+        }
+        player.equipment[a.data] = null;
+        player.recalc();
+        this.drag = { item: cur, from: { kind: 'equip', slot: a.data } };
         return true;
       }
 
@@ -553,12 +810,70 @@ export class UI {
     return this.pointerOverPanel(mx, my, ctx);
   }
 
+  // What the buttons under an NPC's dialogue do. `ctx` is the game context, for
+  // the shared rng, the level and sound.
+  npcAction(id, player, ctx) {
+    const npc = this.npc;
+    if (!npc) { this.open = null; return; }
+
+    if (id === 'leave') { this.open = null; this.npc = null; return; }
+
+    if (id === 'talk') {
+      const quest = npc.questLine(player);
+      const line = npc.nextLine();
+      // Alternate between what they think of the world and what they want done.
+      this.npcSaid = (quest && npc.lineIndex % 2 === 0) ? quest : (line || quest || npc.def.greeting);
+      this.open = 'talk';
+      return;
+    }
+
+    if (id === 'trade') {
+      this.ensureStock(ctx.rng, ctx.level ? ctx.level.areaLevel : 1, npc);
+      this.open = 'vendor';
+      return;
+    }
+
+    if (id === 'gamble') {
+      this.ensureGamble(ctx.rng, player, npc);
+      this.open = 'gamble';
+      return;
+    }
+
+    if (id === 'heal') {
+      const full = player.hp >= player.maxHp && player.mana >= player.maxMana;
+      player.hp = player.maxHp;
+      player.mana = player.maxMana;
+      player.burning = 0;
+      player.chilled = 0;
+      player.frozen = 0;
+      this.npcSaid = full
+        ? 'You are already whole. Save your strength for the moor.'
+        : 'May the Eye watch over you. Go well.';
+      if (ctx.sfx) ctx.sfx('quest');
+      this.open = 'talk';
+      return;
+    }
+
+    if (id === 'identify') {
+      let n = 0;
+      for (const slot of player.inventory) if (identify(slot.item)) n++;
+      for (const key in player.equipment) if (identify(player.equipment[key])) n++;
+      if (n) player.recalc();
+      this.npcSaid = n
+        ? `${n} item${n === 1 ? '' : 's'} named. Carry them knowingly.`
+        : 'You carry nothing that hides its nature from me.';
+      if (ctx.sfx) ctx.sfx(n ? 'quest' : 'error');
+      this.open = 'talk';
+    }
+  }
+
   dropOn(a, mx, my, player, ctx) {
     const item = this.drag.item;
     if (a.kind === 'equip') {
       const slot = a.data;
       const wanted = item.slot === 'ring' ? ['ring1', 'ring2'] : [item.slot];
       if (!wanted.includes(slot)) { this.say('That does not go there'); return true; }
+      if (item.identified === false) { this.say('Deckard Cain must identify that first'); return true; }
       if (!canEquip(player, item)) { this.say('You do not meet the requirements'); return true; }
       const prev = player.equipment[slot];
       player.equipment[slot] = item;
@@ -600,15 +915,22 @@ export class UI {
       return;
     }
     if (!item.slot || item.slot === 'potion') return;
+    if (item.identified === false) { this.say('Deckard Cain must identify that first'); return; }
     if (!canEquip(player, item)) { this.say('You do not meet the requirements'); return; }
     const target = item.slot === 'ring' ? (player.equipment.ring1 ? 'ring2' : 'ring1') : item.slot;
     const prev = player.equipment[target];
     removeFromInventory(player, item);
     player.equipment[target] = item;
+    // A two-handed weapon and a shield cannot both be worn, whichever goes on last.
     if (target === 'weapon' && item.twoHand && player.equipment.shield) {
       const sh = player.equipment.shield;
       player.equipment.shield = null;
       addToInventory(player, sh);
+    }
+    if (target === 'shield' && player.equipment.weapon && player.equipment.weapon.twoHand) {
+      const wp = player.equipment.weapon;
+      player.equipment.weapon = null;
+      addToInventory(player, wp);
     }
     player.recalc();
     if (prev) addToInventory(player, prev);
@@ -634,11 +956,15 @@ export class UI {
     const L = this.layout(ctx.canvasSize.w, ctx.canvasSize.h, ctx.scale);
     const rects = [];
     if (this.open === 'inventory' || this.open === 'vendor') rects.push(L.right);
-    if (this.open === 'character' || this.open === 'vendor') rects.push(L.leftPanel);
+    if (this.open === 'character' || this.open === 'vendor' || this.open === 'gamble') rects.push(L.leftPanel);
     if (this.open === 'skills') rects.push(L.wide);
+    if (this.open === 'talk') rects.push(this.talkRect(ctx.canvasSize.w, ctx.canvasSize.h, ctx.scale));
     if (this.open === 'waypoint') {
       const w = 300 * ctx.scale, h = 260 * ctx.scale;
       rects.push({ x: ctx.canvasSize.w / 2 - w / 2, y: ctx.canvasSize.h / 2 - h / 2, w, h });
+    }
+    if (this.open === 'skillpicker' && ctx.player) {
+      rects.push(this.pickerRect(ctx.canvasSize.w, ctx.canvasSize.h, ctx.scale, ctx.player));
     }
     return rects.some((r) => mx >= r.x && my >= r.y && mx < r.x + r.w && my < r.y + r.h);
   }

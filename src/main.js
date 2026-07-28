@@ -9,10 +9,10 @@ import { startLoop } from './core/loop.js';
 import { Camera } from './core/iso.js';
 import { Input } from './core/input.js';
 import { Rng, hashSeed } from './core/rng.js';
-import { bakeTiles, getProp } from './art/tiles.js';
-import { bakeAllFigures } from './art/figures.js';
+import { bakeTiles, getProp, TILE_BAKE_STEPS } from './art/tiles.js';
+import { bakeAllFigures, FIGURE_BAKE_STEPS } from './art/figures.js';
 import { Particles, FX } from './art/fx.js';
-import { iconFor, bakeIcons } from './art/icons.js';
+import { iconFor, bakeIcons, ICON_BAKE_STEPS } from './art/icons.js';
 import { AREAS, AREA_BY_ID, WAYPOINT_AREAS } from './world/levels.js';
 import { generate } from './world/gen.js';
 import { Renderer } from './render/renderer.js';
@@ -20,13 +20,14 @@ import { drawMinimap } from './render/minimap.js';
 import { Player } from './game/player.js';
 import { applyDamage, applyChill, rollHit, rollDamage, tickBurn, xpPenalty, xpForLevel } from './game/combat.js';
 import { populate, spawnBoss, Monster } from './game/monster.js';
+import { populateTown } from './game/npc.js';
 import { updateAI } from './game/ai.js';
-import { dropLoot, dropFromContainer, pickUp, addToInventory, groundItem } from './game/loot.js';
+import { dropLoot, dropFromContainer, pickUp, addToInventory, groundItem, scatterWorldItems } from './game/loot.js';
 import { Projectiles } from './game/projectile.js';
 import { castSkill, allocate, refreshPassives } from './game/skills.js';
 import { makeGold } from './items/item.js';
 import { UI } from './ui/panels.js';
-import { drawHUD, drawGroundLabels, drawMonsterBanner, HUD_H } from './ui/hud.js';
+import { drawHUD, drawGroundLabels, drawMonsterBanner, drawCursor, HUD_H } from './ui/hud.js';
 import { panel, panelTitle } from './ui/tooltip.js';
 import * as audio from './audio/synth.js';
 import { save, load, hasSave, clear as clearSave, applyTo } from './save.js';
@@ -57,7 +58,7 @@ resize();
 const assets = { figures: {} };
 let state = 'loading';
 let loadPct = 0, loadLabel = '';
-const TOTAL_BAKE_STEPS = 7 + 7 + 12 + 11 + 43;
+const TOTAL_BAKE_STEPS = TILE_BAKE_STEPS + FIGURE_BAKE_STEPS + ICON_BAKE_STEPS;
 let bakeSteps = 0;
 function* allBakers() { yield* bakeTiles(); yield* bakeAllFigures(assets.figures); yield* bakeIcons(); }
 const baker = allBakers();
@@ -106,6 +107,9 @@ function newGame() {
   levels.clear();
   corpse = null;
   player = new Player({ x: 0, y: 0, sheet: assets.figures.sorceress });
+  // The point that pays for the skill bound to the right button at the start.
+  // Without it `allocate` refuses and the new character's right click is dead.
+  player.skillPoints = 1;
   allocate(player, 'firebolt');
   player.rightSkill = 'firebolt';
   player.leftSkill = 'attack';
@@ -143,6 +147,8 @@ function getLevel(id) {
   const lv = generate(def, hashSeed(`${seed}:${id}`));
   if (def.monsters && def.monsters.length) populate(lv, def, lvRng, assets.figures);
   if (def.boss && !player.quests[def.quest]) spawnBoss(lv, def.boss, lvRng, assets.figures);
+  if (lv.townCentre) populateTown(lv, lv.townCentre.x, lv.townCentre.y, assets.figures);
+  if (def.kind !== 'town') scatterWorldItems(lv, lvRng, 6 + Math.round(def.areaLevel * 0.8));
   levels.set(id, lv);
   return lv;
 }
@@ -167,6 +173,7 @@ function enterArea(id, fromId, snapCamera) {
   player.x = at.x; player.y = at.y;
   player.stop();
   player.target = null;
+  pending = null;
   level.markExplored(player.x, player.y, 12);
   if (snapCamera) { cam.x = player.x; cam.y = player.y; }
   transitionCool = 0.6;
@@ -361,6 +368,60 @@ function playerAttack(target) {
   });
 }
 
+function castsOnLeft() {
+  return player.leftSkill && player.leftSkill !== 'attack';
+}
+
+// Clicking something out of reach walks to it and does the thing on arrival,
+// rather than making you click a second time once you get there.
+let pending = null;
+const REACH = { npc: 3.4, item: 1.7, prop: 2, waypoint: 3.2 };
+
+// Do the interaction if the target is close enough. Returns whether it fired.
+function reach(kind, target) {
+  if (!target || Math.hypot(target.x - player.x, target.y - player.y) > REACH[kind]) return false;
+  pending = null;
+  if (kind === 'npc') {
+    player.stop();
+    player.face(target.x, target.y);
+    target.face(player.x, player.y);
+    ui.talkTo(target);
+    audio.sfx('quest');
+  } else if (kind === 'waypoint') {
+    player.stop();
+    ui.toggle('waypoint');
+  } else if (kind === 'item') {
+    if (target.taken) return true;
+    const got = pickUp(player, target);
+    if (!got) { ui.say('No room for that'); audio.sfx('error'); }
+    else audio.sfx(target.item.gold ? 'gold' : 'pickup');
+  } else if (kind === 'prop') {
+    if (!target.opened) openContainer(target);
+  }
+  return true;
+}
+
+// Interact now if you can, otherwise set off and remember what for.
+function walkTo(kind, target) {
+  if (reach(kind, target)) return;
+  player.target = null;
+  player.moveTo(level, target.x, target.y);
+  pending = { kind, target };
+}
+
+// Called every step while walking toward something that was clicked at range.
+function servePending() {
+  if (!pending) return;
+  const t = pending.target;
+  const gone = (pending.kind === 'item' && t.taken)
+    || (pending.kind === 'prop' && t.opened)
+    || (pending.kind === 'npc' && !t.alive);
+  if (gone) { pending = null; return; }
+  if (reach(pending.kind, t)) return;
+  // Walked as far as the path went and still short: give up rather than hover.
+  if (!player.path) pending = null;
+}
+
 function doCast(id, tx, ty) {
   if (!id || id === 'attack') return false;
   const r = castSkill(player, id, tx, ty, gctx);
@@ -371,6 +432,28 @@ function doCast(id, tx, ty) {
   audio.sfx('cast');
   player.setAnim('cast', { loop: false, force: true, onEnd: () => player.setAnim('idle') });
   return true;
+}
+
+// The bar's clickable rectangles, kept from the last frame it was drawn. The
+// layout only depends on the canvas size, so a frame of lag cannot matter.
+let hudRegions = null;
+
+function inRect(r, x, y) { return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h; }
+
+// A click on the bar itself: a belt slot drinks, a skill button opens the picker.
+function hudClick(mx, my) {
+  if (!hudRegions) return false;
+  for (const b of hudRegions.belt) {
+    if (!inRect(b, mx, my)) continue;
+    if (!drinkBelt(b.index)) { ui.say('That belt slot is empty'); audio.sfx('error'); }
+    return true;
+  }
+  for (const sb of hudRegions.skills) {
+    if (!inRect(sb, mx, my)) continue;
+    ui.openPicker(sb.side);
+    return true;
+  }
+  return false;
 }
 
 function drinkBelt(i) {
@@ -470,7 +553,7 @@ function step(dt) {
   if (state === 'dead') {
     deathScreenT += dt;
     player.updateAnim(dt);
-    for (const e of level.entities) if (!e.isPlayer) updateAI(e, dt, gctx);
+    for (const e of level.entities) if (!e.isPlayer && !e.isNpc) updateAI(e, dt, gctx);
     fx.update(dt);
     if (Input.consume('Enter') || Input.consume('Space') || (deathScreenT > 1.2 && Input.consumeL())) resurrect();
     Input.endFrame();
@@ -493,30 +576,32 @@ function step(dt) {
   const overPanel = ui.pointerOverPanel(mx, my, gctx);
 
   if (Input.consumeL()) {
-    if (!ui.mouseDown(mx, my, player, gctx, 0) && !overHud) {
+    if (ui.mouseDown(mx, my, player, gctx, 0)) {
+      // a panel took it
+    } else if (overHud) {
+      hudClick(mx, my);
+    } else {
       const gi = groundItemUnderCursor();
       const prop = propUnderCursor();
       const m = entityUnderCursor();
       const w = cam.toWorld(mx, my);
-      // Talking to the vendor and using the waypoint are both walk-up actions.
-      const vendorNear = level.vendor && Math.hypot(level.vendor.x - w.x, level.vendor.y - w.y) < 1.6;
+      // Talking to someone and using the waypoint are both walk-up actions.
       const wpNear = level.waypoint && Math.hypot(level.waypoint.x - w.x, level.waypoint.y - w.y) < 1.6;
 
-      if (vendorNear && Math.hypot(level.vendor.x - player.x, level.vendor.y - player.y) < 3.5) {
-        ui.toggle('vendor'); if (ui.open === 'vendor') ui.ensureStock(rng, level.areaLevel);
-      } else if (wpNear && player.waypoints[areaId]
-                 && Math.hypot(level.waypoint.x - player.x, level.waypoint.y - player.y) < 3.5) {
-        ui.toggle('waypoint');
+      pending = null;
+      if (m && m.isNpc) {
+        walkTo('npc', m);
+      } else if (wpNear && player.waypoints[areaId]) {
+        walkTo('waypoint', level.waypoint);
       } else if (gi) {
-        if (Math.hypot(gi.x - player.x, gi.y - player.y) < 1.7) {
-          const got = pickUp(player, gi);
-          if (!got) { ui.say('No room for that'); audio.sfx('error'); }
-          else audio.sfx(gi.item.gold ? 'gold' : 'pickup');
-        } else player.moveTo(level, gi.x, gi.y);
+        walkTo('item', gi);
       } else if (prop) {
-        if (Math.hypot(prop.x - player.x, prop.y - player.y) < 2) openContainer(prop);
-        else player.moveTo(level, prop.x, prop.y);
-      } else if (m) {
+        walkTo('prop', prop);
+      } else if (castsOnLeft()) {
+        // A skill bound to the left button casts where you click, as in the
+        // original — which is why Attack is what sits there by default.
+        if (player.busy <= 0) { player.target = null; player.stop(); doCast(player.leftSkill, w.x, w.y); }
+      } else if (m && !m.isNpc) {
         player.target = m;
         if (player.distTo(m) <= 1.6) { player.stop(); playerAttack(m); }
         else player.moveTo(level, m.x, m.y);
@@ -527,7 +612,8 @@ function step(dt) {
     }
   } else if (Input.mouse.downL && !overHud && !overPanel && player.busy <= 0 && !ui.drag && !player.target) {
     const w = cam.toWorld(mx, my);
-    if (!player.moveGoal || Math.hypot(w.x - player.moveGoal.x, w.y - player.moveGoal.y) > 0.8) {
+    if (castsOnLeft()) doCast(player.leftSkill, w.x, w.y);
+    else if (!player.moveGoal || Math.hypot(w.x - player.moveGoal.x, w.y - player.moveGoal.y) > 0.8) {
       player.moveTo(level, w.x, w.y);
     }
   }
@@ -550,11 +636,12 @@ function step(dt) {
   if (player.target && !player.target.alive) player.target = null;
 
   player.update(dt, level);
+  servePending();
   tickBurn(player, dt);
   if (player.hp <= 0 && state === 'playing') die();
 
   for (const e of level.entities) {
-    if (e.isPlayer) continue;
+    if (e.isPlayer || e.isNpc) continue;
     if (e.alive && e.burning > 0) {
       const before = e.hp;
       tickBurn(e, dt);
@@ -566,8 +653,12 @@ function step(dt) {
   level.removeDead();
   projectiles.update(dt, gctx);
 
-  for (const gi of level.items) {
-    if (gi.taken || !gi.item.gold) continue;
+  // Gold is picked up by walking over it. Anything already taken is dropped from
+  // the list here rather than at pick-up time, so nothing iterates it twice.
+  for (let i = level.items.length - 1; i >= 0; i--) {
+    const gi = level.items[i];
+    if (gi.taken) { level.items.splice(i, 1); continue; }
+    if (!gi.item.gold) continue;
     if (Math.hypot(gi.x - player.x, gi.y - player.y) < 1.2 && pickUp(player, gi)) audio.sfx('gold');
   }
 
@@ -657,7 +748,17 @@ function render() {
   renderer.draw(level, cam, { player, fx, projectiles, time: clock, playerLightRadius: 12 });
 }
 
+// The scene, then the cursor on top of everything. `drawFrame` reports what the
+// pointer is over so the cursor can say whether a click will hit, take or talk.
+let cursorMode = 'pointer';
+
 function draw(fps) {
+  cursorMode = 'pointer';
+  drawFrame(fps);
+  drawCursor(ctx2d, Input.mouse.x, Input.mouse.y, cursorMode, uiScale);
+}
+
+function drawFrame(fps) {
   if (state === 'loading') {
     pumpLoading();
     ctx2d.fillStyle = '#0b0a0e';
@@ -690,6 +791,9 @@ function draw(fps) {
   const m = entityUnderCursor();
   if (m) drawMonsterBanner(ctx2d, m, cam, uiScale);
 
+  if (m) cursorMode = m.isNpc ? 'talk' : 'hostile';
+  else if (hovered || propUnderCursor()) cursorMode = 'take';
+
   // Corpse marker, so the gold you lost is findable.
   if (corpse && corpse.area === areaId) {
     const p = cam.toScreen(corpse.x, corpse.y);
@@ -703,8 +807,14 @@ function draw(fps) {
     ctx2d.textAlign = 'left';
   }
 
+  // Over the bar or an open panel the pointer is a pointer, whatever lies in
+  // the world behind them.
+  if (Input.mouse.y > canvas.height - HUD_H * uiScale || ui.pointerOverPanel(Input.mouse.x, Input.mouse.y, gctx)) {
+    cursorMode = 'pointer';
+  }
+
   drawMinimap(ctx2d, level, player, ui.mapMode ? 'overlay' : 'corner', canvas.width, canvas.height, uiScale);
-  drawHUD(ctx2d, player, { scale: uiScale, iconFor });
+  hudRegions = drawHUD(ctx2d, player, { scale: uiScale, iconFor, mouse: Input.mouse });
   ui.onTravel = travelTo;
   ui.draw(ctx2d, player, {
     scale: uiScale, mouse: Input.mouse,

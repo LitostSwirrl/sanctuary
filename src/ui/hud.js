@@ -4,7 +4,7 @@
 import { Buf, capsule, ellipse, ellipseF, polyF, lineP, outline, bufToCanvas } from '../art/pixel.js';
 import { ramp, packHex } from '../art/palette.js';
 import { SKILL_BY_ID, skillLevel, manaCost } from '../game/skills.js';
-import { RARITY_COLOUR } from '../items/item.js';
+import { RARITY_COLOUR, itemName } from '../items/item.js';
 import { xpForLevel } from '../game/combat.js';
 
 export const HUD_H = 92;          // logical pixels
@@ -125,6 +125,8 @@ export function drawHUD(ctx, player, opts) {
   const barH = HUD_H * s;
   const y = H - barH;
   const regions = { belt: [], skills: [], globes: {} };
+  const mouse = opts.mouse || { x: -1, y: -1 };
+  const over = (x, yy, w, h) => mouse.x >= x && mouse.y >= yy && mouse.x < x + w && mouse.y < yy + h;
 
   // Panel
   ctx.save();
@@ -159,9 +161,10 @@ export function drawHUD(ctx, player, opts) {
   const by = y + barH / 2 - slot / 2;
   for (let i = 0; i < 4; i++) {
     const x = bx + i * (slot + 6 * s);
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    const hov = over(x, by, slot, slot);
+    ctx.fillStyle = hov ? 'rgba(70,60,34,0.75)' : 'rgba(0,0,0,0.55)';
     ctx.fillRect(x, by, slot, slot);
-    ctx.strokeStyle = 'rgba(140,120,70,0.6)';
+    ctx.strokeStyle = hov ? '#ffe08a' : 'rgba(140,120,70,0.6)';
     ctx.lineWidth = 1.5 * s;
     ctx.strokeRect(x + 0.5, by + 0.5, slot - 1, slot - 1);
     const p = player.belt[i];
@@ -179,9 +182,10 @@ export function drawHUD(ctx, player, opts) {
   const drawSkillButton = (id, x, isLeft) => {
     const sz = 46 * s;
     const yy = y + barH / 2 - sz / 2;
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    const hov = over(x, yy, sz, sz);
+    ctx.fillStyle = hov ? 'rgba(70,60,34,0.75)' : 'rgba(0,0,0,0.55)';
     ctx.fillRect(x, yy, sz, sz);
-    ctx.strokeStyle = 'rgba(150,130,80,0.7)';
+    ctx.strokeStyle = hov ? '#ffe08a' : 'rgba(150,130,80,0.7)';
     ctx.lineWidth = 2 * s;
     ctx.strokeRect(x + 0.5, yy + 0.5, sz - 1, sz - 1);
     if (id && id !== 'attack') {
@@ -214,6 +218,52 @@ export function drawHUD(ctx, player, opts) {
   return regions;
 }
 
+// ------------------------------------------------------------------ cursor
+
+// The page hides the system cursor so it cannot sit on top of the scene at the
+// wrong scale, which means the game has to draw its own. `mode` says what is
+// under it: 'hostile' brackets a target, 'talk' and 'take' mark something you
+// can walk up to, anything else is the plain pointer.
+export function drawCursor(ctx, x, y, mode, s) {
+  ctx.save();
+  ctx.lineJoin = 'round';
+
+  if (mode === 'hostile') {
+    const r = 13 * s;
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.lineWidth = 4 * s;
+    for (let i = 0; i < 2; i++) {
+      // Four corner brackets, drawn once in black and once in red over it.
+      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        ctx.beginPath();
+        ctx.moveTo(x + sx * r, y + sy * r - sy * r * 0.55);
+        ctx.lineTo(x + sx * r, y + sy * r);
+        ctx.lineTo(x + sx * r - sx * r * 0.55, y + sy * r);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = '#e03a2a';
+      ctx.lineWidth = 2 * s;
+    }
+    ctx.fillStyle = '#e03a2a';
+    ctx.fillRect(x - 1 * s, y - 1 * s, 2 * s, 2 * s);
+    ctx.restore();
+    return;
+  }
+
+  // A stubby angular arrow, black-edged so it reads on any terrain.
+  const p = [[0, 0], [0, 15], [4.2, 11.4], [7, 17], [10, 15.4], [7.2, 10], [12, 9.4]];
+  ctx.beginPath();
+  ctx.moveTo(x + p[0][0] * s, y + p[0][1] * s);
+  for (let i = 1; i < p.length; i++) ctx.lineTo(x + p[i][0] * s, y + p[i][1] * s);
+  ctx.closePath();
+  ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+  ctx.lineWidth = 3 * s;
+  ctx.stroke();
+  ctx.fillStyle = mode === 'talk' ? '#ffd24a' : mode === 'take' ? '#8fd88f' : '#e8dcbc';
+  ctx.fill();
+  ctx.restore();
+}
+
 // ------------------------------------------------------- world-space labels
 
 // Item names on the ground. Alt shows every one; otherwise only what is close
@@ -241,7 +291,7 @@ export function drawGroundLabels(ctx, level, cam, opts) {
     }
     placed.push({ x: p.x, y: ly });
 
-    const name = gi.item.gold ? `${gi.item.gold} Gold` : gi.item.name;
+    const name = gi.item.gold ? `${gi.item.gold} Gold` : itemName(gi.item);
     const w = ctx.measureText(name).width;
     ctx.fillStyle = 'rgba(0,0,0,0.66)';
     ctx.fillRect(p.x - w / 2 - 5 * s, ly - 11 * s, w + 10 * s, 15 * s);
@@ -261,6 +311,26 @@ export function drawMonsterBanner(ctx, m, cam, s) {
   if (!m) return;
   const p = cam.toScreen(m.x, m.y);
   const label = m.label || m.name;
+
+  // Townsfolk get a name and a title, and no health bar.
+  if (m.isNpc) {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = `${Math.round(15 * s)}px Georgia, serif`;
+    const w = Math.max(110 * s, ctx.measureText(m.title || '').width + 24 * s);
+    const y = p.y - 78 * s;
+    ctx.fillStyle = 'rgba(0,0,0,0.62)';
+    ctx.fillRect(p.x - w / 2, y - 15 * s, w, 38 * s);
+    ctx.fillStyle = '#e8d9a0';
+    ctx.fillText(label, p.x, y);
+    ctx.font = `${Math.round(11 * s)}px Georgia, serif`;
+    ctx.fillStyle = '#9a8f70';
+    ctx.fillText(m.title || '', p.x, y + 16 * s);
+    ctx.textAlign = 'left';
+    ctx.restore();
+    return;
+  }
+
   ctx.save();
   ctx.font = `${Math.round(14 * s)}px Georgia, serif`;
   ctx.textAlign = 'center';

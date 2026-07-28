@@ -55,7 +55,7 @@ export function panelTitle(ctx, text, x, y, w, s) {
 }
 
 // Wrap a long line to a pixel width, returning the pieces.
-function wrapText(ctx, text, maxW) {
+export function wrapText(ctx, text, maxW) {
   const words = text.split(' ');
   const out = [];
   let line = '';
