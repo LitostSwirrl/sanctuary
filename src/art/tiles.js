@@ -314,10 +314,128 @@ function propStairs() {
   return { canvas: bufToCanvas(buf), ox: 32, oy: 36 };
 }
 
+// --------------------------------------------------------- encampment props
+
+// A canvas A-frame over a ridge pole, with a dark triangle for the open flap.
+// The whole camp is these; two colours of canvas keeps a row from repeating.
+function propTent(rng) {
+  const buf = new Buf(96, 84);
+  const canvas = ramp(rng.chance(0.5) ? '#8a7a5c' : '#7a6a4e');
+  const pole = ramp(COLORS.wood);
+  const W = 34, H = 44, base = 74;
+  capsule(buf, 48, base - H - 4, 2, 48, base, 2, pole);
+  // Two sloped faces, the left one lit.
+  polyF(buf, [48, base - H, 48 + W, base, 48, base + 8], canvas.base);
+  polyF(buf, [48, base - H, 48 - W, base, 48, base + 8], canvas.light);
+  polyF(buf, [48, base - H, 48 - 11, base + 2, 48 + 11, base + 2], packRGB(0, 0, 0, 150));
+  for (const d of [-1, 1]) {
+    capsule(buf, 48 + d * W, base, 1.6, 48 + d * (W + 8), base + 6, 1.2, pole);
+  }
+  ellipse(buf, 48, base - H - 5, 2.5, 2.5, ramp(COLORS.blood));
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: 48, oy: 76 };
+}
+
+// Warriv's wagon: a bed on two wheels under a hooped canvas tilt.
+function propWagon() {
+  const buf = new Buf(104, 72);
+  const wood = ramp(COLORS.wood);
+  const tilt = ramp('#9a8b6a');
+  const iron = ramp(COLORS.darkSteel);
+  rectF(buf, 18, 40, 68, 12, wood.base);
+  capsule(buf, 18, 40, 2, 86, 40, 2, wood.light);
+  polyF(buf, [22, 40, 30, 14, 74, 14, 82, 40], tilt.base);
+  polyF(buf, [22, 40, 30, 14, 46, 14, 42, 40], tilt.light);
+  // Hoops go on after the canvas, or the canvas simply paints over them.
+  for (let i = 1; i < 4; i++) {
+    const t = i / 4;
+    lineP(buf, 22 + t * 60, 40, 30 + t * 44, 14, packRGB(0, 0, 0, 70));
+  }
+  for (const cx of [32, 74]) {
+    ellipse(buf, cx, 56, 11, 11, iron);
+    ellipseF(buf, cx, 56, 6, 6, packRGB(0, 0, 0, 120));
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI;
+      capsule(buf, cx - Math.cos(a) * 9, 56 - Math.sin(a) * 9, 1,
+        cx + Math.cos(a) * 9, 56 + Math.sin(a) * 9, 1, iron.light);
+    }
+  }
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: 52, oy: 64 };
+}
+
+// Charsi's forge: an anvil on a block, with the fire still in it.
+function propAnvil() {
+  const buf = new Buf(46, 44);
+  const iron = ramp(COLORS.darkSteel);
+  const wood = ramp(COLORS.wood);
+  capsule(buf, 23, 38, 8, 23, 30, 8, wood);
+  polyF(buf, [10, 22, 36, 22, 32, 27, 14, 27], iron.base);
+  rectF(buf, 19, 27, 8, 5, iron.dark);
+  polyF(buf, [4, 20, 14, 18, 14, 24, 6, 24], iron.light);
+  ellipseF(buf, 23, 20, 5, 2, packHex('#ff8a30'));
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: 23, oy: 40, light: { r: 4, color: '#ff7a30', dz: 14 } };
+}
+
+// Logs leaning into a cone over a low ring of stones. The stones stay small and
+// dark: drawn any bigger they ring the fire like petals rather than sit round it.
+function propCampfire(rng) {
+  const buf = new Buf(48, 44);
+  const stone = ramp('#4e4a44');
+  const wood = ramp('#4a3520');
+  const ground = 34;
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2 + 0.3;
+    ellipse(buf, 24 + Math.cos(a) * 13, ground + Math.sin(a) * 6, 3.2, 2.2, stone);
+  }
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + rng.range(0, 1.5);
+    capsule(buf, 24 + Math.cos(a) * 9, ground + Math.sin(a) * 4, 2.4, 24, ground - 16, 1.4, wood);
+  }
+  // Flame: three stacked ellipses, coolest at the base.
+  ellipseF(buf, 24, ground - 6, 7, 8, packHex('#a83a10'));
+  ellipseF(buf, 24, ground - 11, 5, 7, packHex('#ff8020'));
+  ellipseF(buf, 24, ground - 15, 2.6, 4.5, packHex('#ffd870'));
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: 24, oy: ground + 3, light: { r: 8, color: '#ff8c3a', dz: 20 } };
+}
+
+// A box, not a lid: at this scale it has to be nearly as tall as it is wide or
+// it reads as a plank lying on the ground.
+function propCrate(rng) {
+  const buf = new Buf(40, 44);
+  const wood = ramp(rng.chance(0.5) ? '#6a5030' : COLORS.wood);
+  const dark = packRGB(0, 0, 0, 80);
+  const top = 12, bot = 38, half = 16;
+  polyF(buf, [20 - half, top + 6, 20, top, 20 + half, top + 6, 20, top + 12], wood.light);
+  polyF(buf, [20 - half, top + 6, 20, top + 12, 20, bot, 20 - half, bot - 6], wood.base);
+  polyF(buf, [20 + half, top + 6, 20, top + 12, 20, bot, 20 + half, bot - 6], wood.dark);
+  lineP(buf, 20 - half, top + 6, 20, bot - 8, dark);
+  lineP(buf, 20 + half, top + 6, 20, bot - 8, dark);
+  lineP(buf, 20 - half, (top + bot) / 2, 20, (top + bot) / 2 + 6, dark);
+  lineP(buf, 20 + half, (top + bot) / 2, 20, (top + bot) / 2 + 6, dark);
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: 20, oy: 40 };
+}
+
+// A pointed stake, repeated along a line to fence the camp in.
+function propPalisade(rng) {
+  const buf = new Buf(24, 56);
+  const wood = ramp(rng.chance(0.5) ? '#5a4028' : '#4e3722');
+  capsule(buf, 12, 52, 5, 12, 12, 4.5, wood);
+  polyF(buf, [7, 13, 12, 4, 17, 13], wood.light);
+  capsule(buf, 4, 34, 1.6, 20, 32, 1.6, ramp(COLORS.darkSteel));
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: 12, oy: 53 };
+}
+
 const PROP_BAKERS = {
   tree: propTree, rock: propRock, column: propColumn, brazier: propBrazier,
   torch: propTorch, barrel: propBarrel, chest: propChest, gravestone: propGrave,
   bones: propBones, waypoint: propWaypoint, portal: propPortal, stairs: propStairs,
+  tent: propTent, wagon: propWagon, anvil: propAnvil, campfire: propCampfire,
+  crate: propCrate, palisade: propPalisade,
 };
 
 // ------------------------------------------------------------------ exports
@@ -341,6 +459,10 @@ export function getWall(terrain, wx, wy) {
   return set[(h >>> 0) % set.length];
 }
 
+// How many times the generator below yields, so the loading bar does not have
+// to be told by hand every time a terrain or a prop is added.
+export const TILE_BAKE_STEPS = Object.keys(TERRAIN).length * 2 + Object.keys(PROP_BAKERS).length;
+
 // Bake everything, yielding often enough that the loading screen keeps drawing.
 export function* bakeTiles() {
   const rng = new Rng(20260728);
@@ -357,7 +479,7 @@ export function* bakeTiles() {
   }
   for (const name of Object.keys(PROP_BAKERS)) {
     // A few variants of the scattered natural props, one of everything else.
-    const n = ['tree', 'rock', 'gravestone', 'bones'].includes(name) ? 4 : 1;
+    const n = ['tree', 'rock', 'gravestone', 'bones', 'tent', 'crate', 'palisade'].includes(name) ? 4 : 1;
     PROPS[name] = [];
     for (let i = 0; i < n; i++) PROPS[name].push(PROP_BAKERS[name](rng.fork(name + i)));
     yield { label: 'prop ' + name };

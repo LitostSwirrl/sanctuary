@@ -120,16 +120,41 @@ function placeProp(lv, name, x, y, rng, solid = true) {
 
 // Guarantee every exit is still reachable once solid props are down. If one is
 // not, drop the props rather than the exit.
+// Flood from the spawn honouring props as well as tiles. `floodRegion` walks
+// tiles only, which is right when it is used to pick the largest region — the
+// props do not exist yet — but wrong here: a barrel standing in a one-tile
+// corridor seals it, and a tile-only flood walks straight through and reports
+// the level fine. About one dungeon in a hundred was generated with an exit
+// nothing could reach.
+function walkableFlood(lv, sx, sy) {
+  const seen = new Uint8Array(lv.w * lv.h);
+  if (!lv.walkableTile(sx, sy)) return seen;
+  const stack = [sy * lv.w + sx];
+  seen[stack[0]] = 1;
+  while (stack.length) {
+    const i = stack.pop();
+    const x = i % lv.w, y = (i / lv.w) | 0;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      const j = ny * lv.w + nx;
+      if (!lv.inBounds(nx, ny) || seen[j] || !lv.walkableTile(nx, ny)) continue;
+      seen[j] = 1;
+      stack.push(j);
+    }
+  }
+  return seen;
+}
+
 function verifyReachable(lv) {
   const s = { x: Math.floor(lv.start.x), y: Math.floor(lv.start.y) };
-  const region = floodRegion(lv, s.x, s.y);
-  const inRegion = new Uint8Array(lv.w * lv.h);
-  for (const i of region) inRegion[i] = 1;
-  const bad = lv.exits.some((e) => !inRegion[Math.floor(e.y) * lv.w + Math.floor(e.x)]);
-  if (bad) {
-    lv.solid.fill(0);
-    for (const p of lv.props) p.solid = false;
-  }
+  const seen = walkableFlood(lv, s.x, s.y);
+  const bad = lv.exits.some((e) => !seen[Math.floor(e.y) * lv.w + Math.floor(e.x)]);
+  if (!bad) return;
+  // The tiles were already verified connected when the region was chosen, so a
+  // prop is what closed the way. Give up prop collision for this level: walking
+  // through a crate is invisible next to an exit nobody can reach.
+  lv.solid.fill(0);
+  for (const p of lv.props) p.solid = false;
 }
 
 // ------------------------------------------------------------------ outdoor
@@ -356,16 +381,40 @@ export function genTown(seed, def) {
   lv.waypoint = { x: cx - 5.5, y: cy - 3.5 };
   placeProp(lv, 'waypoint', cx - 6, cy - 4, rng, false);
 
-  lv.vendor = { x: cx + 5.5, y: cy - 3.5 };
-  placeProp(lv, 'chest', cx + 5, cy - 4, rng, true);
-  placeProp(lv, 'barrel', cx + 6, cy - 3, rng, true);
+  // Where the townsfolk stand. `populateTown` places them relative to this, and
+  // each of these props is somebody's station: a tent to stand in front of, an
+  // anvil for the smith, a wagon for the caravan master.
+  lv.townCentre = { x: cx, y: cy };
+  const station = [
+    ['tent', -4, -8], ['crate', -6, -7], ['barrel', -2, -7],          // Akara
+    ['anvil', 5, -7], ['tent', 3, -8], ['barrel', 6, -6],             // Charsi
+    ['tent', 8, 0], ['crate', 8, 3], ['crate', 7, 4],                 // Gheed
+    ['tent', -8, 0], ['barrel', -8, 3],                               // Cain
+    ['campfire', -2, 8], ['crate', -3, 9],                            // Kashya
+    ['wagon', 4, 8], ['barrel', 5, 10], ['crate', 3, 10],             // Warriv
+    ['campfire', 0, 0],                                               // the middle of camp
+  ];
+  for (const [name, dx, dy] of station) {
+    const x = Math.round(cx + dx), y = Math.round(cy + dy);
+    if (propSafe(lv, x, y)) placeProp(lv, name, x, y, rng, name !== 'campfire');
+  }
 
-  // Campfires and clutter around the compound edge.
+  // A stake fence just inside the wall, with the gates left open.
+  const gates = def.exits.map((ex) => sideTarget(lv, ex.side));
+  for (let i = 0; i < 64; i++) {
+    const a = (i / 64) * Math.PI * 2;
+    const x = Math.round(cx + Math.cos(a) * (R - 1.5));
+    const y = Math.round(cy + Math.sin(a) * (R - 1.5));
+    if (gates.some((g) => Math.hypot(g.x - x, g.y - y) < 5)) continue;
+    if (propSafe(lv, x, y)) placeProp(lv, 'palisade', x, y, rng, true);
+  }
+
+  // Fires and clutter around the compound edge.
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2 + 0.4;
-    const x = Math.floor(cx + Math.cos(a) * (R - 3));
-    const y = Math.floor(cy + Math.sin(a) * (R - 3));
-    if (propSafe(lv, x, y)) placeProp(lv, i % 2 ? 'brazier' : 'barrel', x, y, rng, true);
+    const x = Math.floor(cx + Math.cos(a) * (R - 4));
+    const y = Math.floor(cy + Math.sin(a) * (R - 4));
+    if (propSafe(lv, x, y)) placeProp(lv, i % 3 === 0 ? 'campfire' : i % 3 === 1 ? 'barrel' : 'crate', x, y, rng, i % 3 !== 0);
   }
   for (let i = 0; i < 10; i++) {
     const x = 2 + rng.i(size - 4), y = 2 + rng.i(size - 4);
