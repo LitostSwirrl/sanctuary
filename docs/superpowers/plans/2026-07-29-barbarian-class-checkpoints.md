@@ -7,7 +7,7 @@
 
 - **Spec** — `docs/superpowers/specs/2026-07-29-barbarian-class-design.md`: done (2026-07-29)
 - **Plan** — `docs/superpowers/plans/2026-07-29-barbarian-class.md`: done, self-reviewed, committed (2026-07-29)
-- **Task 1 — The Barbarian figure**: pending
+- **Task 1 — The Barbarian figure**: done (2026-07-29, commit 272e7d9)
 - **Task 2 — Class data and plumbing**: pending
 - **Task 3 — Class select on the title**: pending
 - **Task 4 — Melee skill path + Combat strikes**: pending
@@ -43,6 +43,14 @@ Execution mode: **subagent-driven** (decided 2026-07-29). First execution resume
 **Why**: A second class is the reason a second run exists, and it proves the class-shaped systems actually hold two classes. The plan front-loads the figure (Task 1) because nothing is playable without a sheet, lands plumbing before skills (Task 2–3), then adds mechanics in dependency order: melee path (4) → body-owning skills (5) → monster status + buffs (6) → passive folds (7) → the spec's verification contract as ship gate (8), with Nightmare gated behind full green (9). Key mechanism decisions recorded in the plan itself: melee skills set their own attack animation and weapon-speed busy inside `cast()` while `doCast` merely skips the caster lockout for `melee: true`; Leap/Whirlwind run through a `player.action` per-frame closure ticked at the top of `Player.update`; buffs live in `player.buffs = { id: { t, mag } }` folded in `recalc`; masteries flow through `refreshPassives` writing `player.masteryPoints` (the Warmth precedent — no skills import in player.js).
 
 **Next**: Execute Task 1 (the figure) per the plan, subagent-driven.
+
+### Task 1 — The Barbarian figure (2026-07-29)
+
+**What**: Palette ramps, the two-handed attack pose (both arms drive the swing, peak on frame 3), the greataxe rig with the left-hand haft snap, and `FIGURE_SPECS.barbarian` — commit `272e7d9`. Implemented by a subagent, reviewed by a second; review Approved with every code requirement verified against source (branch ordering, the build-merge trap, valid build keys, automatic bake-step registration).
+
+**Why**: The sheet is the foundation; nothing is playable without it. All five anims bake (`__sheetFor('barbarian')` has cast, canvas 640 wide); the sprite reads broader than the Sorceress, both hands on the axe, swing sweeps, death topples; console clean.
+
+**Next**: Task 2 (class data and plumbing). One parked finding rides along: the 450ms cold-bake gate fails at the pre-Barbarian baseline in this environment (557-561ms without him, ~590ms with; marginal cost ~25-30ms) — re-measured and adjudicated at Task 8 check 6.
 
 ---
 
