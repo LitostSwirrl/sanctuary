@@ -17,7 +17,7 @@
 - **Task 8 — Verification contract (ship gate)**: pending
 - **Task 9 — Nightmare (STRETCH, only after Task 8 green)**: pending
 
-Execution mode (subagent-driven vs inline): awaiting the user's choice; the first execution resume prompt is written once it lands.
+Execution mode: **subagent-driven** (decided 2026-07-29). First execution resume prompt below.
 
 ## Cross-cutting contracts
 
@@ -42,4 +42,42 @@ Execution mode (subagent-driven vs inline): awaiting the user's choice; the firs
 
 **Why**: A second class is the reason a second run exists, and it proves the class-shaped systems actually hold two classes. The plan front-loads the figure (Task 1) because nothing is playable without a sheet, lands plumbing before skills (Task 2–3), then adds mechanics in dependency order: melee path (4) → body-owning skills (5) → monster status + buffs (6) → passive folds (7) → the spec's verification contract as ship gate (8), with Nightmare gated behind full green (9). Key mechanism decisions recorded in the plan itself: melee skills set their own attack animation and weapon-speed busy inside `cast()` while `doCast` merely skips the caster lockout for `melee: true`; Leap/Whirlwind run through a `player.action` per-frame closure ticked at the top of `Player.update`; buffs live in `player.buffs = { id: { t, mag } }` folded in `recalc`; masteries flow through `refreshPassives` writing `player.masteryPoints` (the Warmth precedent — no skills import in player.js).
 
-**Next**: Await the execution-mode decision, then execute Task 1 (the figure) per the plan.
+**Next**: Execute Task 1 (the figure) per the plan, subagent-driven.
+
+---
+
+## Execution Resume Prompt (Tasks 1 onward)
+
+(2026-07-29, generated after the subagent-driven decision landed)
+
+```
+Continue the Barbarian build: execute the implementation plan task-by-task with subagent-driven development.
+
+Working directory: /Users/jinsoon/Work/Projects/experiments/diablo
+
+State:
+- Spec done: docs/superpowers/specs/2026-07-29-barbarian-class-design.md
+- Plan done, self-reviewed, committed (e66ac6b): docs/superpowers/plans/2026-07-29-barbarian-class.md — 9 tasks with exact files, code blocks and browser checks
+- Checkpoints file: docs/superpowers/plans/2026-07-29-barbarian-class-checkpoints.md (State block, cross-cutting contracts, log)
+- No implementation has started; Tasks 1-9 all pending. Execution mode decided: subagent-driven (fresh subagent per task, review between tasks).
+
+Before starting:
+1. Read the plan's Global Constraints section, then Task 1 in full.
+2. Read the checkpoints file's Cross-cutting contracts — serve.js usage, browser-verification hooks (__forceLoad / __step / __render / __g / __sheetFor), the SKILLS append-only rule, the humanoid() build-merge trap, commit convention.
+3. Invoke superpowers:subagent-driven-development and drive the plan through it.
+
+Goals:
+- Execute Tasks 1-8 in order, one fresh subagent per task, reviewing each subagent's diff against the plan task before moving on. Task 8 is the spec's verification contract — the class ships only when all eight checks have been observed in a real browser against serve.js (claude-in-chrome; Chrome DevTools MCP is blocked by a stale profile lock in this environment). Task 9 (Nightmare) only if Task 8 is fully green and there is room; otherwise move that section to the README backlog per the plan.
+- Subagents must WRITE files, not plan — instruct them explicitly. Verify each task's file changes exist on disk before accepting the result.
+- Each task ends committed: Conventional Commits, trailer "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>".
+
+Conventions: the plan's Global Constraints and the checkpoints file's Cross-cutting contracts bind every task. Console must stay clean in every browser check. Never python http.server — node serve.js only.
+
+Output: working code committed per task; the checkpoints file kept current as tasks complete.
+
+After each task (post-completion checklist):
+1. Mark the task done in the checkpoints State block with the date.
+2. Append a What/Why/Next entry to the checkpoints Log.
+3. Commit.
+4. Only at a gate where the context window is worth shedding (~30%+ used) or the session is ending: generate the next task's resume prompt (self-contained, this same shape), pbcopy it silently, append it to the checkpoints file, and tell the user it is safe to /clear. Otherwise continue in-session.
+```
