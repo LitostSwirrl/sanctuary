@@ -36,6 +36,11 @@ export function defenseFrom(dex, armour = 0) {
   return Math.floor(dex / 4) + armour;
 }
 
+// Defence as the to-hit roll should see it: Battle Cry (task 6) halves it.
+export function monsterDefense(m) {
+  return Math.floor(m.defense * (m.battlecry ? m.battlecry.def : 1));
+}
+
 // Per-class derivation of life and mana. Sorceress values are the originals:
 // two life per vitality, two mana per energy, one life and two mana per level.
 export const CLASS_STATS = {

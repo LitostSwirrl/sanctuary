@@ -18,13 +18,13 @@ import { generate } from './world/gen.js';
 import { Renderer } from './render/renderer.js';
 import { drawMinimap } from './render/minimap.js';
 import { Player } from './game/player.js';
-import { applyDamage, applyChill, rollHit, rollDamage, tickBurn, xpPenalty, xpForLevel } from './game/combat.js';
+import { applyDamage, applyChill, rollHit, rollDamage, monsterDefense, tickBurn, xpPenalty, xpForLevel } from './game/combat.js';
 import { populate, spawnBoss, Monster } from './game/monster.js';
 import { populateTown } from './game/npc.js';
 import { updateAI } from './game/ai.js';
 import { dropLoot, dropFromContainer, pickUp, addToInventory, groundItem, scatterWorldItems } from './game/loot.js';
 import { Projectiles } from './game/projectile.js';
-import { castSkill, allocate, refreshPassives } from './game/skills.js';
+import { castSkill, allocate, refreshPassives, SKILL_BY_ID } from './game/skills.js';
 import { makeGold, rollItem } from './items/item.js';
 import { UI } from './ui/panels.js';
 import { drawHUD, drawGroundLabels, drawMonsterBanner, drawCursor, HUD_H } from './ui/hud.js';
@@ -111,9 +111,10 @@ function newGame(cls = 'sorceress') {
   // Without it `allocate` refuses and the new character's right click is dead.
   player.skillPoints = 1;
   if (cls === 'barbarian') {
-    // His firebolt-point is an axe in the hand rather than a skill point spent.
+    // The starting point goes to Bash; the axe is equipped either way.
     player.equipment.weapon = rollItem(rng, 1, { baseId: 'handaxe', rarity: 'normal', identified: true });
-    player.rightSkill = 'attack';
+    allocate(player, 'bash');
+    player.rightSkill = 'bash';
     player.leftSkill = 'attack';
   } else {
     allocate(player, 'firebolt');
@@ -366,7 +367,7 @@ function playerAttack(target) {
     loop: false, force: true, hitFrame: 3,
     onHitFrame: () => {
       if (!target.alive || player.distTo(target) > 1.7) return;
-      if (!rollHit(rng, player.attackRating, target.defense, player.level, target.mlvl)) {
+      if (!rollHit(rng, player.attackRating, monsterDefense(target), player.level, target.mlvl)) {
         fx.float(target.x, target.y, 'miss', 'rgba(190,190,190,1)');
         return;
       }
@@ -436,10 +437,15 @@ function doCast(id, tx, ty) {
   const r = castSkill(player, id, tx, ty, gctx);
   if (r === 'mana') { ui.say('Not enough mana'); audio.sfx('error'); return false; }
   if (r !== 'ok') return false;
-  player.busy = 0.4 / (1 + player.castRate / 100);
-  player.face(tx, ty);
-  audio.sfx('cast');
-  player.setAnim('cast', { loop: false, force: true, onEnd: () => player.setAnim('idle') });
+  const sk = SKILL_BY_ID[id];
+  if (!sk.melee) {
+    // Casts take the cast animation and the FCR lockout. A melee skill has
+    // already set its own attack animation and weapon-speed busy inside cast().
+    player.busy = 0.4 / (1 + player.castRate / 100);
+    player.face(tx, ty);
+    audio.sfx('cast');
+    player.setAnim('cast', { loop: false, force: true, onEnd: () => player.setAnim('idle') });
+  }
   return true;
 }
 

@@ -10,6 +10,8 @@
 //   { level, player, fx, rng, projectiles, time, sfx,
 //     damageMonster(monster, dmgObject, opts) }
 
+import { rollHit, rollDamage, monsterDefense } from './combat.js';
+
 const TAU = Math.PI * 2;
 
 // ------------------------------------------------------------------ helpers
@@ -88,6 +90,64 @@ function aimVector(caster, tx, ty, speed) {
   const dx = tx - caster.x, dy = ty - caster.y;
   const d = Math.hypot(dx, dy) || 1;
   return { vx: (dx / d) * speed, vy: (dy / d) * speed, dx: dx / d, dy: dy / d };
+}
+
+// ------------------------------------------------------------------- melee
+
+// One weapon blow with a skill's bonuses folded in. Mastery ED/AR are already
+// inside minDamage/maxDamage/attackRating via recalc; skill ED stacks on top.
+function weaponHit(caster, m, ctx, { ed = 0, ar = 0, mul = 1 } = {}) {
+  if (!rollHit(ctx.rng, caster.attackRating + ar, monsterDefense(m), caster.level, m.mlvl)) {
+    ctx.fx.float(m.x, m.y, 'miss', 'rgba(190,190,190,1)');
+    return 0;
+  }
+  const raw = rollDamage(ctx.rng, caster.minDamage, caster.maxDamage,
+    caster.totals.ed + ed, caster.effective.str) * mul;
+  return ctx.damageMonster(m, { phys: raw }, { source: caster });
+}
+
+function knockback(level, m, fromX, fromY, dist) {
+  const dx = m.x - fromX, dy = m.y - fromY;
+  const d = Math.hypot(dx, dy) || 1;
+  m.moveBy((dx / d) * dist, (dy / d) * dist, level);
+}
+
+// The two-handed axe reaches a little past the bare-hand attack's 1.6/1.7.
+const MELEE_REACH = 1.9;
+
+function meleeTarget(ctx, caster, tx, ty) {
+  let best = null, bd = 1.3;                    // nearest to the click...
+  for (const e of ctx.level.entities) {
+    if (!e.alive || e.isPlayer || e.isNpc) continue;
+    const d = Math.hypot(e.x - tx, e.y - ty);
+    if (d < bd) { bd = d; best = e; }
+  }
+  if (best && caster.distTo(best) <= MELEE_REACH) return best;
+  best = null; bd = MELEE_REACH;                // ...else nearest in reach.
+  for (const e of ctx.level.entities) {
+    if (!e.alive || e.isPlayer || e.isNpc) continue;
+    const d = caster.distTo(e);
+    if (d < bd) { bd = d; best = e; }
+  }
+  return best;
+}
+
+// Swing at whatever the click meant. Returns false — veto, mana refunded —
+// when nothing is in reach. The effect runs in the hit-frame callback on
+// frame 3, exactly like the plain attack.
+function meleeStrike(caster, tx, ty, ctx, onHit) {
+  const target = meleeTarget(ctx, caster, tx, ty);
+  if (!target) return false;
+  caster.stop();
+  caster.busy = 0.42 / caster.attackSpeed;
+  caster.face(target.x, target.y);
+  if (ctx.sfx) ctx.sfx('swing');
+  caster.setAnim('attack', {
+    loop: false, force: true, hitFrame: 3,
+    onHitFrame: () => { if (target.alive && caster.distTo(target) <= MELEE_REACH + 0.2) onHit(target); },
+    onEnd: () => caster.setAnim('idle'),
+  });
+  return true;
 }
 
 // ------------------------------------------------------------------- skills
@@ -361,6 +421,53 @@ export const SKILLS = [
     id: 'lightmastery', name: 'Lightning Mastery', tree: 'light', req: 24, prereq: ['nova'], passive: true,
     blurb: 'Enemy lightning resistance counts for much less.',
     effect: (l) => `-${Math.min(130, 20 + 7 * (l - 1))}% Enemy Lightning Resist`,
+  },
+
+  // -------------------------------------------------------- BARBARIAN COMBAT
+  {
+    id: 'bash', name: 'Bash', tree: 'combat', req: 1, prereq: [], melee: true, iconSeed: 0,
+    mana: () => 2,
+    blurb: 'A crushing blow that sends the target staggering back.',
+    effect: (l) => `+${50 + 8 * (l - 1)}% Damage, +${20 + 5 * (l - 1)} Attack Rating, knocks back`,
+    cast(caster, lvl, tx, ty, ctx) {
+      return meleeStrike(caster, tx, ty, ctx, (target) => {
+        const dealt = weaponHit(caster, target, ctx, { ed: 50 + 8 * (lvl - 1), ar: 20 + 5 * (lvl - 1) });
+        if (dealt > 0 && target.alive) knockback(ctx.level, target, caster.x, caster.y, 0.7);
+      });
+    },
+  },
+  {
+    id: 'doubleswing', name: 'Double Swing', tree: 'combat', req: 6, prereq: ['bash'], melee: true, iconSeed: 1,
+    mana: () => 1,
+    blurb: 'One swing for the target, one for whoever stands beside it.',
+    effect: (l) => `Two hits, +${15 + 5 * (l - 1)} Attack Rating each`,
+    cast(caster, lvl, tx, ty, ctx) {
+      const ar = 15 + 5 * (lvl - 1);
+      return meleeStrike(caster, tx, ty, ctx, (target) => {
+        weaponHit(caster, target, ctx, { ar });
+        let other = null, od = MELEE_REACH + 0.2;
+        for (const e of ctx.level.entities) {
+          if (!e.alive || e.isPlayer || e.isNpc || e === target) continue;
+          const d = caster.distTo(e);
+          if (d < od) { od = d; other = e; }
+        }
+        if (other) weaponHit(caster, other, ctx, { ar });
+      });
+    },
+  },
+  {
+    id: 'concentrate', name: 'Concentrate', tree: 'combat', req: 18, prereq: ['bash'], melee: true, iconSeed: 3,
+    mana: () => 2,
+    synergies: [{ id: 'bash', pct: 5 }],
+    blurb: 'A deliberate, heavy blow. Bash practice makes it heavier.',
+    effect: (l) => `+${60 + 10 * (l - 1)}% Damage, +${30 + 5 * (l - 1)} Attack Rating`,
+    cast(caster, lvl, tx, ty, ctx) {
+      // Synergy reads hard points, matching every other synergy in the file.
+      const ed = 60 + 10 * (lvl - 1) + 5 * allocatedPoints(caster, 'bash');
+      return meleeStrike(caster, tx, ty, ctx, (target) => {
+        weaponHit(caster, target, ctx, { ed, ar: 30 + 5 * (lvl - 1) });
+      });
+    },
   },
 ];
 
