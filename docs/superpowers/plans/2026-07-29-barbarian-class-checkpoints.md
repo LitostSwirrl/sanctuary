@@ -10,7 +10,7 @@
 - **Task 1 — The Barbarian figure**: done (2026-07-29, commit 272e7d9)
 - **Task 2 — Class data and plumbing**: done (2026-07-29, commit 4ab59fd)
 - **Task 3 — Class select on the title**: done (2026-07-29, commit 79fcb99)
-- **Task 4 — Melee skill path + Combat strikes**: pending
+- **Task 4 — Melee skill path + Combat strikes**: done (2026-07-29, commit 7cf6975)
 - **Task 5 — Leap and Whirlwind**: pending
 - **Task 6 — Monster status + Warcries**: pending
 - **Task 7 — Masteries**: pending
@@ -67,6 +67,14 @@ Execution mode: **subagent-driven** (decided 2026-07-29). First execution resume
 **Why**: The title is where a second class becomes visible; both classes are now creatable in-game end to end (card click → spawn → save → reload → Continue restores the Barbarian without asking).
 
 **Next**: Task 4 (melee skill path + Bash / Double Swing / Concentrate).
+
+### Task 4 — Melee skill path + Combat strikes (2026-07-29)
+
+**What**: `monsterDefense` in combat.js; the melee helpers in skills.js (`weaponHit`, `knockback`, `MELEE_REACH 1.9`, two-pass `meleeTarget`, `meleeStrike` with veto-and-refund); Bash / Double Swing / Concentrate appended under the `// BARBARIAN COMBAT` banner; `doCast`'s `melee: true` bypass; `playerAttack` reads `monsterDefense`; a new Barbarian starts with Bash allocated and bound right — commit `7cf6975`. Review Approved; cross-cutting audits clean (all rollHit sites accounted for; SKILL_BY_ID/doCast consumers unaffected; no import cycle).
+
+**Why**: The melee path is the mechanical spine of the class — mana-paid, veto-refunded, weapon-speed strikes with the skill ED/AR stacking the plan's formula convention. All observed live: knockback displacement (exact 0.7), two floats on one Double Swing, tooltip growth, "Not enough mana", the class gate both directions.
+
+**Next**: Task 5 (Leap and Whirlwind). One parked plan-level finding (controller-adjudicated, stands as designed): Double Swing's second hit shares the primary's hit-frame gate — whiffs entirely if the primary is invalidated mid-windup (~0.2s, 1 mana); matches the plain-attack whiff convention; only bash/doubleswing/concentrate consume meleeStrike. Overrule = move the guard per-hit.
 
 ---
 
