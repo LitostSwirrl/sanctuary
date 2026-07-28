@@ -113,3 +113,47 @@ After each task (post-completion checklist):
 3. Commit.
 4. Only at a gate where the context window is worth shedding (~30%+ used) or the session is ending: generate the next task's resume prompt (self-contained, this same shape), pbcopy it silently, append it to the checkpoints file, and tell the user it is safe to /clear. Otherwise continue in-session.
 ```
+
+---
+
+## Execution Resume Prompt (Task 5 onward)
+
+(2026-07-29, generated after Task 4 completed — Tasks 1-4 done, window at the shedding gate)
+
+```
+Continue the Barbarian build: Tasks 1-4 are done and committed; resume subagent-driven execution at Task 5 (Leap and Whirlwind).
+
+Working directory: /Users/jinsoon/Work/Projects/experiments/diablo
+
+State:
+- Plan: docs/superpowers/plans/2026-07-29-barbarian-class.md (9 tasks; its Global Constraints bind every task)
+- Checkpoints: docs/superpowers/plans/2026-07-29-barbarian-class-checkpoints.md (State block current through Task 4; per-task Log entries)
+- Done on main: Task 1 figure (272e7d9), Task 2 class plumbing + __newGame(cls) (4ab59fd), Task 3 title class select (79fcb99), Task 4 melee path — Bash/Double Swing/Concentrate, doCast melee bypass, monsterDefense (7cf6975). A docs checkpoint commit follows each.
+- Pending: Task 5 (Leap/Whirlwind), 6 (monster status + Warcries), 7 (Masteries), 8 (verification contract — ship gate), 9 (Nightmare, stretch — only if 8 fully green, else move to README backlog per the plan).
+- SDD workspace exists: .superpowers/sdd/2026-07-29-barbarian-class/ — progress.md is the ledger (completions + parked findings), task-N-brief.md / task-N-report.md per task.
+
+Before starting:
+1. Read the plan's Global Constraints, then Task 5 in full.
+2. Read the checkpoints file's Cross-cutting contracts, then the ledger (.superpowers/sdd/2026-07-29-barbarian-class/progress.md) — tasks with a "complete" line are DONE, never re-dispatch them. Two parked findings ride forward: the 450ms cold-bake gate (baseline exceeds it pre-Barbarian; adjudicated at Task 8 check 6) and Double Swing's shared hit-frame gate (controller-ruled stands-as-designed; final-review triage).
+3. Invoke superpowers:subagent-driven-development and resume its loop at Task 5.
+
+Goals:
+- Execute Tasks 5-8 in order: one fresh implementer subagent per task (model sonnet, general-purpose, synchronous, dispatched with the task brief + report path), a task review after each (sonnet), scoped re-reviews on fix rounds, and the final whole-branch review (most capable model) after all tasks. Task 9 only if Task 8 is fully green and there is room.
+- Subagents must WRITE files, not plan — instruct them explicitly. Verify each task's changes exist on disk; the implementer commits its own task.
+- Each task ends committed: Conventional Commits, trailer "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>".
+
+Conventions (session-proven; restate to subagents):
+- node serve.js from the project root serves http://localhost:8231/index.html. Check the port first (lsof -ti :8231); if free, start node serve.js as a background Bash task. Never python http.server.
+- Browser checks: claude-in-chrome (Chrome DevTools MCP is blocked by a stale profile lock). Implementers invoke the claude-in-chrome skill, then ONE ToolSearch call loading tabs_context_mcp, tabs_create_mcp, navigate, computer, javascript_tool, read_console_messages. New tab each time; window.__forceLoad() first (backgrounded tabs throttle rAF to ~1fps); drive the sim with window.__step(1/60) + window.__render(); clicks as real PointerEvents at computed canvas coordinates (proven against the production listeners); console must be clean at the end of every check.
+- window.__g is live state; window.__newGame(cls) exists. SKILLS entries are appended after concentrate — never inserted — and every new entry sets an explicit iconSeed. Melee helpers weaponHit/knockback/meleeStrike/MELEE_REACH are module-local in src/game/skills.js; monsterDefense is exported from src/game/combat.js; allocate/refreshPassives are already imported in src/main.js.
+- No emoji anywhere, including reviewer output — reviewers use plain PASS / FAIL / CANNOT-VERIFY markers.
+- SDD scripts live at /Users/jinsoon/.claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/skills/subagent-driven-development/scripts/ (task-brief, review-package, sdd-workspace). Record BASE (git rev-parse HEAD) before each implementer dispatch; build the reviewer's diff with review-package PLAN BASE HEAD; the reviewer gets three paths — brief, report, package — plus the plan's Global Constraints verbatim.
+
+Output: working code committed per task; the checkpoints file and the ledger kept current as tasks complete.
+
+After each task (post-completion checklist):
+1. Mark the task done in the checkpoints State block with the date.
+2. Append a What/Why/Next entry to the checkpoints Log.
+3. Commit the checkpoints file (docs: checkpoint — ...).
+4. Only at a gate where the context window is worth shedding (~30%+ used) or the session is ending: generate the next task's resume prompt (self-contained, this same shape), pbcopy it silently, append it to the checkpoints file, commit, and tell the user it is safe to /clear. Otherwise continue in-session.
+```
