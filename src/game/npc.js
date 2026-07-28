@@ -15,6 +15,9 @@ export const NPCS = [
     figure: 'akara', at: { dx: -3.5, dy: -5.5 }, face: 3,
     services: ['heal', 'trade'],
     greeting: 'Welcome, sister. The Sightless Eye watches over you here.',
+    greetingByClass: {
+      barbarian: 'Welcome, warrior. The Sightless Eye watches over you here.',
+    },
     stockSlots: ['weapon', 'body', 'head'],
     stockCaster: true,
     lines: [
@@ -69,6 +72,9 @@ export const NPCS = [
     figure: 'kashya', at: { dx: -1.5, dy: 6.5 }, face: 7,
     services: [],
     greeting: 'Another sorceress. Try not to die where my scouts have to carry you back.',
+    greetingByClass: {
+      barbarian: 'A barbarian of the north. Try not to die where my scouts have to carry you back.',
+    },
     lines: [
       'My rogues hold this camp. We do not hold anything past the gate.',
       'Blood Raven led this company once. What walks the burial grounds now is not her.',
@@ -142,11 +148,12 @@ export class Npc extends Entity {
 
 // Stand everyone around the town centre. The generator owns where the centre
 // is; this only knows the offsets each NPC keeps from it.
-export function populateTown(level, cx, cy, figures) {
+export function populateTown(level, cx, cy, figures, cls) {
   level.npcs = [];
   for (const def of NPCS) {
     const spot = level.nearestOpen(cx + def.at.dx, cy + def.at.dy, 8);
     const npc = new Npc(def, spot.x, spot.y, figures[def.figure]);
+    if (def.greetingByClass && def.greetingByClass[cls]) npc.greeting = def.greetingByClass[cls];
     level.addEntity(npc);
     level.npcs.push(npc);
   }

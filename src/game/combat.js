@@ -47,6 +47,14 @@ export const CLASS_STATS = {
     lifePerLevel: 1, manaPerLevel: 2,
     lifePerVitLevel: 0, blockBase: 20,
   },
+  barbarian: {
+    name: 'Barbarian',
+    str: 30, dex: 20, vit: 25, ene: 10,
+    life: 55, mana: 10, stamina: 92,
+    lifePerVit: 4, manaPerEne: 1,
+    lifePerLevel: 2, manaPerLevel: 1,
+    lifePerVitLevel: 0, blockBase: 20,
+  },
 };
 
 export function maxLifeFor(cls, level, vit, bonusFlat = 0, bonusPct = 0) {

@@ -368,13 +368,21 @@ export const SKILL_BY_ID = {};
 for (const s of SKILLS) SKILL_BY_ID[s.id] = s;
 
 export const TREES = ['fire', 'cold', 'light'];
-export const TREE_NAME = { fire: 'Fire', cold: 'Cold', light: 'Lightning' };
+export const CLASS_TREES = {
+  sorceress: ['fire', 'cold', 'light'],
+  barbarian: ['cries', 'combat', 'mastery'],
+};
+export const TREE_NAME = {
+  fire: 'Fire', cold: 'Cold', light: 'Lightning',
+  cries: 'Warcries', combat: 'Combat', mastery: 'Masteries',
+};
 
 // ------------------------------------------------------------- allocation
 
 export function canAllocate(player, id) {
   const sk = SKILL_BY_ID[id];
   if (!sk) return { ok: false, why: 'unknown skill' };
+  if (!CLASS_TREES[player.cls].includes(sk.tree)) return { ok: false, why: 'not of your class' };
   if (player.skillPoints <= 0) return { ok: false, why: 'no skill points' };
   if (player.level < sk.req) return { ok: false, why: `requires level ${sk.req}` };
   for (const p of sk.prereq || []) {

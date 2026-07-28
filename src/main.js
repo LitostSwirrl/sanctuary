@@ -25,7 +25,7 @@ import { updateAI } from './game/ai.js';
 import { dropLoot, dropFromContainer, pickUp, addToInventory, groundItem, scatterWorldItems } from './game/loot.js';
 import { Projectiles } from './game/projectile.js';
 import { castSkill, allocate, refreshPassives } from './game/skills.js';
-import { makeGold } from './items/item.js';
+import { makeGold, rollItem } from './items/item.js';
 import { UI } from './ui/panels.js';
 import { drawHUD, drawGroundLabels, drawMonsterBanner, drawCursor, HUD_H } from './ui/hud.js';
 import { panel, panelTitle } from './ui/tooltip.js';
@@ -101,18 +101,25 @@ const game = {
   get now() { return Date.now(); },
 };
 
-function newGame() {
+function newGame(cls = 'sorceress') {
   seed = (Math.floor(Math.random() * 0x7fffffff)) >>> 0;
   rng = new Rng(seed);
   levels.clear();
   corpse = null;
-  player = new Player({ x: 0, y: 0, sheet: assets.figures.sorceress });
+  player = new Player({ x: 0, y: 0, cls, sheet: assets.figures[cls] });
   // The point that pays for the skill bound to the right button at the start.
   // Without it `allocate` refuses and the new character's right click is dead.
   player.skillPoints = 1;
-  allocate(player, 'firebolt');
-  player.rightSkill = 'firebolt';
-  player.leftSkill = 'attack';
+  if (cls === 'barbarian') {
+    // His firebolt-point is an axe in the hand rather than a skill point spent.
+    player.equipment.weapon = rollItem(rng, 1, { baseId: 'handaxe', rarity: 'normal', identified: true });
+    player.rightSkill = 'attack';
+    player.leftSkill = 'attack';
+  } else {
+    allocate(player, 'firebolt');
+    player.rightSkill = 'firebolt';
+    player.leftSkill = 'attack';
+  }
   player.gold = 80;
   refreshPassives(player);
   player.recalc(true);
@@ -127,7 +134,7 @@ function continueGame() {
   seed = d.seed;
   rng = new Rng(seed);
   levels.clear();
-  player = new Player({ x: 0, y: 0, sheet: assets.figures.sorceress });
+  player = new Player({ x: 0, y: 0, cls: d.cls || 'sorceress', sheet: assets.figures[d.cls || 'sorceress'] });
   let uid = 100000;
   applyTo(player, d, () => uid++);
   refreshPassives(player);
@@ -147,7 +154,7 @@ function getLevel(id) {
   const lv = generate(def, hashSeed(`${seed}:${id}`));
   if (def.monsters && def.monsters.length) populate(lv, def, lvRng, assets.figures);
   if (def.boss && !player.quests[def.quest]) spawnBoss(lv, def.boss, lvRng, assets.figures);
-  if (lv.townCentre) populateTown(lv, lv.townCentre.x, lv.townCentre.y, assets.figures);
+  if (lv.townCentre) populateTown(lv, lv.townCentre.x, lv.townCentre.y, assets.figures, player.cls);
   if (def.kind !== 'town') scatterWorldItems(lv, lvRng, 6 + Math.round(def.areaLevel * 0.8));
   levels.set(id, lv);
   return lv;
@@ -852,7 +859,7 @@ window.addEventListener('beforeunload', () => { if (state === 'playing') save(ga
 // about one frame a second, which makes the chunked loader take a minute under
 // automation and any rAF-based timing meaningless.
 window.__forceLoad = () => { while (state === 'loading') pumpLoading(); return true; };
-window.__newGame = () => { newGame(); return areaId; };
+window.__newGame = (cls) => { newGame(cls); return areaId; };
 window.__continue = () => { continueGame(); return areaId; };
 window.__render = render;
 window.__step = step;

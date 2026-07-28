@@ -85,6 +85,9 @@ export class Player extends Entity {
 
     this.quests = {};
     this.waypoints = { town: true };
+    this.buffs = {};                                   // id -> { t, mag }, ticked in update
+    this.masteryPoints = { axe: 0, mace: 0, sword: 0 }; // written by refreshPassives
+    this.ironSkinLevel = 0;
     this.recalc(true);
   }
 

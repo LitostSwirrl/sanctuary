@@ -11,7 +11,7 @@ import { describe, RARITY_COLOUR, canEquip, rollItem, makePotion, itemName, iden
 import { iconFor, ICON_CELL } from '../art/icons.js';
 import { fits, addToInventory, removeFromInventory, sellValue, groundItem } from '../game/loot.js';
 import {
-  SKILLS, SKILL_BY_ID, TREES, TREE_NAME, allocate, canAllocate,
+  SKILLS, SKILL_BY_ID, CLASS_TREES, TREE_NAME, allocate, canAllocate,
   allocatedPoints, skillLevel, describeSkill, manaCost,
 } from '../game/skills.js';
 import { EQUIP_SLOTS } from '../game/player.js';
@@ -292,7 +292,8 @@ export class UI {
     line('Lightning Resist', `${player.resists.light}%`, '#c0c8ff');
     line('Poison Resist', `${player.resists.pois}%`, '#8fd88f');
     ty += 8 * s;
-    line('Faster Cast Rate', `${player.castRate}%`);
+    if (player.cls === 'barbarian') line('Attack Speed', `${player.totals.ias}%`);
+    else line('Faster Cast Rate', `${player.castRate}%`);
     line('Faster Run/Walk', `${player.totals.frw}%`);
     line('Magic Find', `${player.magicFind}%`);
     line('Gold Find', `${player.goldFind}%`);
@@ -307,7 +308,8 @@ export class UI {
     panel(ctx, x, y, w, h);
     panelTitle(ctx, 'Skills', x, y, w, s);
 
-    const colW = w / 3;
+    const trees = CLASS_TREES[player.cls];
+    const colW = w / trees.length;
     const iconSz = 38 * s;
     const positions = {};
 
@@ -319,7 +321,7 @@ export class UI {
       return Object.keys(byReq).sort((a, b) => a - b).map((k) => byReq[k]);
     };
 
-    TREES.forEach((tree, ti) => {
+    trees.forEach((tree, ti) => {
       const cx = x + colW * ti + colW / 2;
       ctx.fillStyle = '#c8b070';
       ctx.font = `${Math.round(14 * s)}px Georgia, serif`;

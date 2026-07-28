@@ -1,7 +1,7 @@
 // The permanent bar: life and mana globes, the belt, the two bound skills, and
 // the experience strip. Also the labels that float over items on the ground.
 
-import { Buf, capsule, ellipse, ellipseF, polyF, lineP, outline, bufToCanvas } from '../art/pixel.js';
+import { Buf, capsule, ellipse, ellipseF, polyF, lineP, outline, bufToCanvas, rectF } from '../art/pixel.js';
 import { ramp, packHex } from '../art/palette.js';
 import { SKILL_BY_ID, skillLevel, manaCost } from '../game/skills.js';
 import { RARITY_COLOUR, itemName } from '../items/item.js';
@@ -10,7 +10,10 @@ import { xpForLevel } from '../game/combat.js';
 export const HUD_H = 92;          // logical pixels
 const GLOBE_R = 42;
 
-const TREE_COLOUR = { fire: '#ff7a30', cold: '#7ad0ff', light: '#b0c8ff' };
+const TREE_COLOUR = {
+  fire: '#ff7a30', cold: '#7ad0ff', light: '#b0c8ff',
+  combat: '#d04a30', cries: '#e8a030', mastery: '#9aa8b8',
+};
 const skillIcons = new Map();
 
 // A small glyph per skill: element-shaped, varied by index so two fire skills
@@ -33,6 +36,24 @@ function bakeSkillIcon(id) {
         15 + Math.cos(a) * 11, 15 + Math.sin(a) * 11, 1.6, rm);
     }
     ellipse(buf, 15, 15, 4, 4, ramp('#e8f8ff'));
+  } else if (sk.tree === 'combat') {
+    // Axe wedge on a haft.
+    capsule(buf, 13, 27, 1.6, 13, 5, 1.4, ramp('#5a4028'));
+    polyF(buf, [13, 6, 24, 9, 22, 18, 13, 16], packHex(base));
+    polyF(buf, [13, 6, 24, 9, 17, 10], ramp('#ffb090').light);
+  } else if (sk.tree === 'cries') {
+    // Nested shout arcs opening to the right.
+    for (let i = 0; i < 3; i++) {
+      const r = 5 + i * 4;
+      capsule(buf, 9 + r * 0.5, 15 - r * 0.8, 1.5, 9 + r, 15, 1.5, rm);
+      capsule(buf, 9 + r, 15, 1.5, 9 + r * 0.5, 15 + r * 0.8, 1.5, rm);
+    }
+    ellipseF(buf, 7, 15, 2, 2, packHex('#f0e0a0'));
+  } else if (sk.tree === 'mastery') {
+    // Anvil block.
+    polyF(buf, [4, 10, 26, 10, 22, 15, 18, 15, 18, 21, 12, 21, 12, 15, 7, 15], packHex(base));
+    rectF(buf, 9, 21, 12, 3, rm.dark);
+    lineP(buf, 5, 10, 25, 10, rm.light);
   } else {
     polyF(buf, [17, 2, 10, 14, 15, 14, 12, 28, 21, 12, 15, 12], packHex(base));
   }
