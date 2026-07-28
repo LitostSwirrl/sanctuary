@@ -78,6 +78,53 @@ export function dropFromContainer(level, x, y, alvl, player, rng) {
   return out;
 }
 
+// What was already lying there when you arrived: dropped on the road, or
+// tucked against a rock or a gravestone where it takes a look around to spot.
+// Called once per area, when the area is first generated.
+export function scatterWorldItems(level, rng, count) {
+  const out = [];
+  const alvl = level.areaLevel || 1;
+  const tier = tierForAreaLevel(alvl);
+  const start = level.start || { x: level.w / 2, y: level.h / 2 };
+
+  // Props worth hiding something behind, so a find has a reason to be there.
+  const cover = level.props.filter((p) => ['rock', 'bones', 'gravestone', 'tree', 'column', 'barrel'].includes(p.name));
+
+  const place = (x, y, item) => {
+    if (!item) return;
+    const p = level.nearestOpen(x, y, 3);
+    const gi = groundItem(item, p.x, p.y);
+    level.items.push(gi);
+    out.push(gi);
+  };
+
+  for (let i = 0; i < count; i++) {
+    let x, y;
+    // Two in three are stashed against scenery; the rest lie out in the open.
+    if (cover.length && rng.chance(0.66)) {
+      const c = cover[rng.i(cover.length)];
+      const a = rng.f() * Math.PI * 2;
+      x = c.x + Math.cos(a) * 1.2;
+      y = c.y + Math.sin(a) * 1.2;
+    } else {
+      let guard = 0;
+      do {
+        x = 1 + rng.i(level.w - 2) + 0.5;
+        y = 1 + rng.i(level.h - 2) + 0.5;
+      } while (!level.walkableTile(x | 0, y | 0) && guard++ < 40);
+      if (!level.walkableTile(x | 0, y | 0)) continue;
+    }
+    // Never right on top of where the player walks in.
+    if (Math.hypot(x - start.x, y - start.y) < 6) continue;
+
+    const roll = rng.f();
+    if (roll < 0.28) place(x, y, makeGold(Math.round((8 + alvl * 8) * rng.range(0.7, 1.8))));
+    else if (roll < 0.5) place(x, y, makePotion(rng.pick(POTIONS.filter((p) => p.tier <= tier)).id));
+    else place(x, y, rollItem(rng, alvl + 1, { tier }));
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- inventory
 
 // True when a w-by-h block starting at (gx, gy) is free.

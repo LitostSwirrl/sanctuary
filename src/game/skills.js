@@ -75,7 +75,7 @@ function rollFor(ctx, player, sk, lvl) {
 function damageArea(ctx, x, y, radius, roll, element, opts = {}) {
   let hits = 0;
   for (const e of ctx.level.entities) {
-    if (!e.alive || e.isPlayer) continue;
+    if (!e.alive || e.isPlayer || e.isNpc) continue;
     const d = Math.hypot(e.x - x, e.y - y);
     if (d > radius + e.radius) continue;
     ctx.damageMonster(e, { [element]: roll() }, opts);
@@ -164,7 +164,7 @@ export const SKILLS = [
           damageArea(ctx, p.x, p.y, sk.radius, roll, 'fire', { source: caster, pierce });
           const dps = 10 + 4 * lvl;
           for (const e of ctx.level.entities) {
-            if (!e.alive || e.isPlayer) continue;
+            if (!e.alive || e.isPlayer || e.isNpc) continue;
             if (Math.hypot(e.x - p.x, e.y - p.y) <= sk.radius + e.radius) {
               e.burning = Math.max(e.burning, 3.5);
               e.burnDps = Math.max(e.burnDps, dps);
@@ -306,7 +306,7 @@ export const SKILLS = [
       ctx.fx.ring(caster.x, caster.y, { maxR: r, cr: 170, cg: 200, cb: 255, life: 0.32, w: 4, lit: 2 });
       let hit = 0;
       for (const e of ctx.level.entities) {
-        if (!e.alive || e.isPlayer) continue;
+        if (!e.alive || e.isPlayer || e.isNpc) continue;
         if (Math.hypot(e.x - caster.x, e.y - caster.y) > r + e.radius) continue;
         ctx.fx.arc(caster.x, caster.y, e.x, e.y, { z: 16, w: 2 });
         // A percentage of current life, so it never finishes anything off.

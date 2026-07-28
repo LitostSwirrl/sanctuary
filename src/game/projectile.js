@@ -86,7 +86,7 @@ export class Projectiles {
       } else {
         let consumed = false;
         for (const e of level.entities) {
-          if (!e.alive || e.isPlayer || p.hitList.has(e)) continue;
+          if (!e.alive || e.isPlayer || e.isNpc || p.hitList.has(e)) continue;
           const d = Math.hypot(e.x - p.x, e.y - p.y);
           if (d >= p.radius + e.radius) continue;
           p.hitList.add(e);
@@ -120,7 +120,7 @@ export class Projectiles {
 function nearestTarget(ctx, p) {
   let best = null, bd = 9;
   for (const e of ctx.level.entities) {
-    if (!e.alive || e.isPlayer || p.hitList.has(e)) continue;
+    if (!e.alive || e.isPlayer || e.isNpc || p.hitList.has(e)) continue;
     const d = Math.hypot(e.x - p.x, e.y - p.y);
     if (d < bd) { bd = d; best = e; }
   }

@@ -47,6 +47,37 @@ function drawStaff(buf, w, h, wood, gem) {
   capsule(buf, cx - w * 0.12, h * 0.2, 1.2, cx + w * 0.12, h * 0.2, 1.2, wood);
 }
 
+// A haft up the middle with a crescent head hung off one side, mirrored for a
+// double-headed axe.
+function drawAxe(buf, w, h, metal, wood, double) {
+  const cx = w / 2;
+  capsule(buf, cx, h * 0.96, 2.2, cx, h * 0.1, 1.9, wood);
+  const top = h * 0.14, bot = h * 0.46;
+  polyF(buf, [cx, top, cx + w * 0.42, h * 0.2, cx + w * 0.36, h * 0.42, cx, bot], metal.base);
+  polyF(buf, [cx, top, cx + w * 0.42, h * 0.2, cx + w * 0.2, h * 0.24], metal.light);
+  if (double) {
+    polyF(buf, [cx, top, cx - w * 0.42, h * 0.2, cx - w * 0.36, h * 0.42, cx, bot], metal.base);
+    polyF(buf, [cx, top, cx - w * 0.42, h * 0.2, cx - w * 0.2, h * 0.24], metal.light);
+  }
+  capsule(buf, cx - w * 0.1, h * 0.86, 1.6, cx + w * 0.1, h * 0.86, 1.6, metal.dark);
+}
+
+// A weighted head on a short haft. Flanges read as a mace rather than a club.
+function drawMace(buf, w, h, metal, wood, flanged) {
+  const cx = w / 2;
+  capsule(buf, cx, h * 0.96, 2.4, cx, h * 0.34, 2.0, wood);
+  ellipse(buf, cx, h * 0.22, w * 0.24, h * 0.16, metal);
+  if (flanged) {
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + 0.4;
+      capsule(buf, cx, h * 0.22, 1.8,
+        cx + Math.cos(a) * w * 0.34, h * 0.22 + Math.sin(a) * h * 0.13, 0.9, metal.light);
+    }
+  }
+  ellipse(buf, cx, h * 0.1, w * 0.09, h * 0.05, metal.light);
+  capsule(buf, cx - w * 0.1, h * 0.88, 1.6, cx + w * 0.1, h * 0.88, 1.6, metal.dark);
+}
+
 function drawOrb(buf, w, h, gem, metal) {
   const cx = w / 2, cy = h / 2;
   ellipse(buf, cx, cy, w * 0.34, h * 0.34, gem);
@@ -155,6 +186,8 @@ function build(item) {
     case 'wand': drawWand(buf, w, h, wood, gem); break;
     case 'staff': drawStaff(buf, w, h, wood, gem); break;
     case 'orb': drawOrb(buf, w, h, gem, metal); break;
+    case 'axe': drawAxe(buf, w, h, metal, wood, !!item.base && item.base.twoHand); break;
+    case 'mace': drawMace(buf, w, h, metal, wood, !!item.base && item.base.flanged); break;
     case 'body': drawBody(buf, w, h, cloth, metal); break;
     case 'helm': drawHelm(buf, w, h, metal, cloth); break;
     case 'shield': drawShield(buf, w, h, metal, gem); break;
@@ -202,6 +235,8 @@ export function iconFor(item) {
 // it drops at once — measured at up to 44ms, a visible hitch in the exact
 // moment the game is meant to feel good. There are only a couple of hundred
 // combinations, so they belong on the loading screen.
+export const ICON_BAKE_STEPS = BASES.length + 1;
+
 export function* bakeIcons() {
   const RARITIES = ['normal', 'magic', 'rare', 'unique'];
   for (const base of BASES) {

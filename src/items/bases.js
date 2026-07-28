@@ -16,6 +16,19 @@ export const BASES = [
   { id: 'sabre', name: 'Sabre', slot: 'weapon', kind: 'sword', w: 1, h: 3, tier: 2, dmg: [3, 8], req: { str: 25, dex: 25 } },
   { id: 'broadsword', name: 'Broad Sword', slot: 'weapon', kind: 'sword', w: 2, h: 3, tier: 3, dmg: [5, 12], req: { str: 48, dex: 0 } },
 
+  // Axes trade attack speed for the top end of the damage range; maces sit in
+  // between and hit hardest of the one-handers at the same requirement.
+  { id: 'handaxe', name: 'Hand Axe', slot: 'weapon', kind: 'axe', w: 1, h: 3, tier: 1, dmg: [3, 6], req: { str: 20, dex: 0 } },
+  { id: 'axe', name: 'Axe', slot: 'weapon', kind: 'axe', w: 2, h: 3, tier: 2, dmg: [4, 11], req: { str: 32, dex: 0 } },
+  { id: 'doubleaxe', name: 'Double Axe', slot: 'weapon', kind: 'axe', w: 2, h: 3, tier: 3, dmg: [5, 13], req: { str: 43, dex: 0 } },
+  { id: 'largeaxe', name: 'Large Axe', slot: 'weapon', kind: 'axe', w: 2, h: 4, tier: 2, dmg: [6, 13], req: { str: 35, dex: 0 }, twoHand: true },
+  { id: 'battleaxe', name: 'Battle Axe', slot: 'weapon', kind: 'axe', w: 2, h: 4, tier: 3, dmg: [12, 32], req: { str: 54, dex: 0 }, twoHand: true },
+  { id: 'club', name: 'Club', slot: 'weapon', kind: 'mace', w: 1, h: 3, tier: 1, dmg: [1, 6], req: { str: 0, dex: 0 } },
+  { id: 'spikedclub', name: 'Spiked Club', slot: 'weapon', kind: 'mace', w: 1, h: 3, tier: 2, dmg: [5, 8], req: { str: 25, dex: 0 } },
+  { id: 'mace', name: 'Mace', slot: 'weapon', kind: 'mace', w: 1, h: 3, tier: 2, dmg: [3, 10], req: { str: 27, dex: 0 }, flanged: true },
+  { id: 'morningstar', name: 'Morning Star', slot: 'weapon', kind: 'mace', w: 1, h: 3, tier: 3, dmg: [7, 16], req: { str: 36, dex: 0 }, flanged: true },
+  { id: 'warhammer', name: 'War Hammer', slot: 'weapon', kind: 'mace', w: 2, h: 3, tier: 3, dmg: [19, 29], req: { str: 53, dex: 0 }, flanged: true },
+
   // Sorceress-flavoured casting weapons: low damage, high modifier potential.
   { id: 'wand', name: 'Wand', slot: 'weapon', kind: 'wand', w: 1, h: 2, tier: 1, dmg: [2, 4], req: { str: 0, dex: 0 }, caster: true },
   { id: 'yewwand', name: 'Yew Wand', slot: 'weapon', kind: 'wand', w: 1, h: 2, tier: 2, dmg: [2, 8], req: { str: 0, dex: 0 }, caster: true },
