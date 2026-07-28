@@ -125,6 +125,7 @@ function newGame(cls = 'sorceress') {
   player.recalc(true);
   enterArea('town', null, true);
   state = 'playing';
+  titleStep = 'menu';
   save(game);
 }
 
@@ -143,6 +144,7 @@ function continueGame() {
   if (d.at) { player.x = d.at.x; player.y = d.at.y; }
   cam.x = player.x; cam.y = player.y;
   state = 'playing';
+  titleStep = 'menu';
 }
 
 // Levels are kept for the session so walking back does not reshuffle the map or
@@ -567,6 +569,12 @@ function step(dt) {
     return;
   }
 
+  if (state === 'title') {
+    if (titleStep === 'class' && Input.consume('Escape')) titleStep = 'menu';
+    Input.endFrame();
+    return;
+  }
+
   if (state !== 'playing' && state !== 'won') { Input.endFrame(); return; }
 
   if (Input.consume('KeyI')) ui.toggle('inventory');
@@ -693,6 +701,8 @@ function drawTitle() {
   ctx2d.font = `${Math.round(15 * s)}px Georgia, serif`;
   ctx2d.fillText('every pixel and every sound generated at load', cx, cy - 56 * s);
 
+  if (titleStep === 'class') { drawClassSelect(cx, cy, s); return; }
+
   const options = [{ id: 'new', label: 'New Game' }];
   if (hasSave()) options.unshift({ id: 'continue', label: 'Continue' });
   titleAreas = [];
@@ -713,7 +723,44 @@ function drawTitle() {
     cx, canvas.height - 40 * s);
   ctx2d.textAlign = 'left';
 }
+
+const CLASS_CARDS = [
+  { id: 'sorceress', name: 'Sorceress', line: 'Fire, ice and lightning, from a safe distance.' },
+  { id: 'barbarian', name: 'Barbarian', line: 'Thirty pounds of steel, from no distance at all.' },
+];
+
+function drawClassSelect(cx, cy, s) {
+  titleAreas = [];
+  const w = 240 * s, h = 250 * s, gap = 40 * s;
+  CLASS_CARDS.forEach((c, i) => {
+    const x = cx - w - gap / 2 + i * (w + gap), y = cy - h / 2 + 30 * s;
+    const hov = Input.mouse.x >= x && Input.mouse.x < x + w && Input.mouse.y >= y && Input.mouse.y < y + h;
+    panel(ctx2d, x, y, w, h, { border: hov ? '#c8a03a' : '#5a4f36' });
+    // Portrait: the baked idle sprite, scaled with hard pixels.
+    const sheet = assets.figures[c.id];
+    const ix = sheet.index('idle', 2, 0);
+    const ps = 140 * s;
+    ctx2d.save();
+    ctx2d.imageSmoothingEnabled = false;
+    ctx2d.drawImage(sheet.canvas, ix.sx, ix.sy, 80, 80, x + (w - ps) / 2, y + 18 * s, ps, ps);
+    ctx2d.restore();
+    ctx2d.textAlign = 'center';
+    ctx2d.fillStyle = hov ? '#ffe08a' : '#c8b070';
+    ctx2d.font = `${Math.round(20 * s)}px Georgia, serif`;
+    ctx2d.fillText(c.name, x + w / 2, y + h - 54 * s);
+    ctx2d.fillStyle = '#8a7f6a';
+    ctx2d.font = `${Math.round(12 * s)}px Georgia, serif`;
+    ctx2d.fillText(c.line, x + w / 2, y + h - 32 * s);
+    titleAreas.push({ x, y, w, h, id: c.id });
+  });
+  ctx2d.fillStyle = '#6a6050';
+  ctx2d.font = `${Math.round(12 * s)}px Georgia, serif`;
+  ctx2d.textAlign = 'center';
+  ctx2d.fillText('Esc to go back', cx, cy + h / 2 + 52 * s);
+  ctx2d.textAlign = 'left';
+}
 let titleAreas = [];
+let titleStep = 'menu';
 
 function drawDeath() {
   const s = uiScale;
@@ -846,7 +893,9 @@ canvas.addEventListener('pointerdown', (e) => {
   const x = (e.clientX - r.left) * dpr, y = (e.clientY - r.top) * dpr;
   for (const a of titleAreas) {
     if (x >= a.x && x < a.x + a.w && y >= a.y && y < a.y + a.h) {
-      if (a.id === 'new') newGame(); else continueGame();
+      if (a.id === 'new') { titleStep = 'class'; return; }
+      if (a.id === 'continue') { continueGame(); audio.ambient(level); return; }
+      newGame(a.id);                       // 'sorceress' | 'barbarian'
       audio.ambient(level);
       return;
     }
