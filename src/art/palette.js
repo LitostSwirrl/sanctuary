@@ -108,6 +108,13 @@ export const COLORS = {
   sorcSkin:    '#e8b894',
   sorcHair:    '#7a3a2a',
 
+  // Barbarian
+  barbSkin:    '#d99a66',
+  barbHide:    '#7a4f2e',
+  barbFur:     '#8a6a48',
+  barbTrim:    '#a8843a',
+  barbHair:    '#4a2f1a',
+
   // Fallen family
   fallenSkin:  '#8c4a3a',
   fallenCloth: '#6a2f2f',

@@ -89,6 +89,24 @@ function poseAngles(anim, t, spec) {
     p.bob = -Math.abs(s) * 1.9;
     p.lean += 0.08;
     p.twist = s * 0.12;
+  } else if (anim === 'attack' && spec.attackStyle === 'twoHand') {
+    // Both arms drive the swing; the peak still lands on frame 3 of 6.
+    let sw;
+    if (t < 0.33) sw = lerp(0, -1.35, ease(t / 0.33));
+    else if (t < 0.5) sw = lerp(-1.35, 1.55, ease((t - 0.33) / 0.17));
+    else sw = lerp(1.55, 0, ease((t - 0.5) / 0.5));
+    p.shoulderR = sw;
+    p.shoulderL = sw * 0.85;
+    p.armUpR = sw < 0 ? -sw * 0.9 : 0;
+    p.armUpL = sw < 0 ? -sw * 0.7 : 0;
+    p.elbowR = 0.25 + Math.max(0, -sw) * 0.6;
+    p.elbowL = 0.45 + Math.max(0, -sw) * 0.5;
+    p.armOutL = 0.3; p.armOutR = -0.1;
+    p.twist = -sw * 0.42;
+    p.lean += Math.max(0, sw) * 0.18 - Math.max(0, -sw) * 0.1;
+    p.hipL = 0.24; p.hipR = -0.2;
+    p.kneeL = 0.22; p.kneeR = 0.3;
+    p.bob = -Math.abs(sw) * 0.8;
   } else if (anim === 'attack') {
     // Wind up, then peak exactly on frame 3 of 6, which is the frame combat
     // treats as the moment of impact. Recover over the back half.
@@ -242,6 +260,20 @@ function segments(spec, j, R, anim, t, a) {
   const legRamp = P.bareLegs ? R.skin : (R.cloth2 || R.cloth);
   const armRamp = P.bareArms ? R.skin : R.cloth;
 
+  // A two-handed weapon is held in both hands: pull the left hand onto the
+  // haft below the right. Mutating the joint here means the left forearm
+  // capsule drawn later already points at the grip.
+  if (spec.weapon === 'greataxe') {
+    const A = j.armR;
+    const dxw = A.hand[0] - A.elbow[0], dyw = A.hand[1] - A.elbow[1], dzw = A.hand[2] - A.elbow[2];
+    const lw = Math.hypot(dxw, dyw, dzw) || 1;
+    j.armL.hand = [
+      A.hand[0] - (dxw / lw) * 4 * S,
+      A.hand[1] - (dyw / lw) * 4 * S + 1.5 * S,
+      A.hand[2] - (dzw / lw) * 4 * S,
+    ];
+  }
+
   for (const side of ['legL', 'legR']) {
     const L = j[side];
     add('capsule', [L.hip, L.knee, b.thighR * S, b.shinR * S * 1.15], legRamp, dep(L.hip, L.knee) - 0.5);
@@ -357,6 +389,17 @@ function segments(spec, j, R, anim, t, a) {
       add('capsule', [a1, a2, 1.6 * S, 0.5 * S], R.metal, dep(a1, a2) + 0.6);
       const g1 = at(-1);
       add('capsule', [[g1[0], g1[1] - 3 * S, g1[2]], [g1[0], g1[1] + 3 * S, g1[2]], 1.0 * S, 1.0 * S], R.trim || R.metal, dep(g1) + 0.65);
+    } else if (W === 'greataxe') {
+      // Long haft carried on the forearm line, wedge head near the top.
+      const a1 = at(-4), a2 = at(17);
+      add('capsule', [a1, a2, 1.7 * S, 1.4 * S], R.wood || R.cloth2, dep(a1, a2) + 0.6);
+      const hp = at(13);
+      // Blade: a fat-to-thin capsule swept out to the side reads as a wedge.
+      const tip = [hp[0], hp[1] + 5.5 * S, hp[2] + 1 * S];
+      add('capsule', [hp, tip, 3.4 * S, 0.8 * S], R.metal, dep(hp, tip) + 0.65);
+      // Back spike for silhouette.
+      const spk = [hp[0], hp[1] - 2.6 * S, hp[2] + 0.5 * S];
+      add('capsule', [hp, spk, 1.6 * S, 0.5 * S], R.metal, dep(hp, spk) + 0.64);
     } else if (W === 'club') {
       const a1 = at(-3), a2 = at(11);
       add('capsule', [a1, a2, 1.1 * S, 2.6 * S], R.wood || R.cloth2, dep(a1, a2) + 0.6);
@@ -528,6 +571,26 @@ export const FIGURE_SPECS = {
     parts: { robe: true, cape: true, hair: true, bareArms: true, belt: true },
     weapon: 'staff',
     build: { ...DEFAULT_BUILD, shoulder: 9, torsoR: 6.0, headR: 6.6 },
+  }),
+
+  barbarian: humanoid({
+    palette: {
+      skin: COLORS.barbSkin, cloth: COLORS.barbHide, cloth2: COLORS.barbFur,
+      trim: COLORS.barbTrim, hair: COLORS.barbHair, metal: COLORS.steel,
+      wood: COLORS.wood, boot: COLORS.leather,
+    },
+    scale: 1.04,
+    parts: { hair: true, bareArms: true, belt: true },
+    weapon: 'greataxe',
+    attackStyle: 'twoHand',
+    build: {
+      ...DEFAULT_BUILD,
+      shoulder: 13, torsoR: 7.8, armR: 3.8, foreR: 3.2,
+      upperArm: 11, foreArm: 10.5,
+      chestU: 44, neckU: 47, headU: 52, headR: 6.8,
+      thighR: 4.6, shinR: 3.6, hipSide: 5.5,
+      hunch: -0.08, stance: 1.1,
+    },
   }),
 
   fallen: humanoid({
