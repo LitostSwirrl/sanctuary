@@ -5,6 +5,10 @@ tile, item icon and sound effect is computed at load, in about a second.
 
 ## Run it
 
+Play it in a browser: **https://litostswirrl.github.io/sanctuary/**
+
+Or locally:
+
 ```
 node serve.js          # then open http://localhost:8231
 ```
@@ -21,7 +25,7 @@ There are no dependencies to install. Node is used only for the two scripts abov
 
 | Input | Action |
 |-------|--------|
-| Left click | move, attack, pick up, open a chest, talk to the vendor |
+| Left click | move, attack, pick up, open a chest, talk to whoever is standing there |
 | Right click | cast the bound skill |
 | `1`–`4` | drink the belt potion in that slot |
 | `I` | inventory |
@@ -32,17 +36,35 @@ There are no dependencies to install. Node is used only for the two scripts abov
 | `Space` / `Esc` | close panels |
 | `M` | mute |
 
+Click something out of reach and you walk over and do it on arrival, rather than clicking twice.
+The cursor says what a click will do: a red bracket over something you can kill, gold over someone
+you can talk to, green over something you can pick up.
+
+The two boxes either side of the belt are the bound skills. Click one to choose what that mouse
+button does — either button takes any skill you have a point in, or the plain attack. The belt
+slots on the bar are clickable as well as bound to `1`–`4`.
+
 Drag items between the bag and the paperdoll. Right click an item in the bag to equip it, or a
-potion to send it to the belt. Drop something outside the panel and it lands on the floor.
+potion to send it to the belt; right click something you are wearing to take it off. Drop
+something outside the panel and it lands on the floor.
 
 ## What is in it
 
 Six areas — Rogue Encampment, Blood Moor, Den of Evil, Cold Plains, Burial Grounds, Catacombs —
 generated from a seed, ending at Andariel. Nine monster types plus three bosses, with champion and
 unique packs that carry modifiers like Extra Fast and Cold Enchanted. Fourteen Sorceress skills
-across three trees with real synergies: points in Fire Bolt raise Fire Ball's damage. Forty-two
-item bases, sixty affixes gated by item level, sixteen fixed uniques, and a grid inventory that
-honours item footprints.
+across three trees with real synergies: points in Fire Bolt raise Fire Ball's damage. Fifty-three
+item bases across seven weapon classes, sixty affixes gated by item level, sixteen fixed uniques,
+and a grid inventory that honours item footprints.
+
+Six people stand in the encampment and each of them does something. Akara heals you and sells
+casting gear; Charsi deals in steel; Gheed gambles, which is to say you buy the base type and find
+out what it turned into afterwards; Deckard Cain names what you are carrying. Rares and uniques
+come out of the ground unidentified and cannot be worn until he does. Kashya and Warriv talk, and
+what they say tracks which of the three quests you have finished.
+
+Loot is not only what falls off a corpse. Every area outside town is seeded with items when it is
+generated — a few in the open, most tucked against a rock or a gravestone or behind a tree.
 
 The rules follow the original rather than approximating it. Chance to hit weighs attack rating
 against defence with a level term and clamps to 5–95. Life and mana derive from vitality and energy
@@ -78,7 +100,7 @@ src/
   art/               pixel rasterizers, palettes, figure poser, tiles, icons, particles
   audio/             synthesized effects
   world/             level container, generators, A* with clearance-aware smoothing
-  game/              entity, combat formulas, player, monsters, AI, skills, projectiles, loot
+  game/              entity, combat formulas, player, monsters, AI, npcs, skills, projectiles, loot
   items/             bases, affixes, uniques, rolling and presentation
   render/            renderer with the light buffer, minimap
   ui/                HUD, panels, tooltips
@@ -93,10 +115,10 @@ Dependencies run one way: `core` → `art`/`audio` → `items` → `world`/`game
 
 | What | Result |
 |------|--------|
-| Generate all art (11 figures, 7 terrains, 12 props, 179 icons) | about 1 s |
-| Frame time, 3840x1858, 89 live monsters | 2.6 ms median, 6.5 ms at p95, budget 16.67 ms |
+| Generate all art (17 figures, 7 terrains, 18 props, 217 icons) | 358 ms to the title screen |
+| Frame time, 2400x1472, Catacombs | 0.9 ms median, 1.3 ms at p95, budget 16.67 ms |
 | Level generation | 1–17 ms per area |
-| Standalone bundle | 303 KB, 35 modules, one file |
+| Standalone bundle | 346 KB, 36 modules, one file |
 
 ## Notes
 
