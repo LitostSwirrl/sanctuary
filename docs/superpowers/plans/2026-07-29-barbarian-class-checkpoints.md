@@ -8,7 +8,7 @@
 - **Spec** — `docs/superpowers/specs/2026-07-29-barbarian-class-design.md`: done (2026-07-29)
 - **Plan** — `docs/superpowers/plans/2026-07-29-barbarian-class.md`: done, self-reviewed, committed (2026-07-29)
 - **Task 1 — The Barbarian figure**: done (2026-07-29, commit 272e7d9)
-- **Task 2 — Class data and plumbing**: pending
+- **Task 2 — Class data and plumbing**: done (2026-07-29, commit 4ab59fd)
 - **Task 3 — Class select on the title**: pending
 - **Task 4 — Melee skill path + Combat strikes**: pending
 - **Task 5 — Leap and Whirlwind**: pending
@@ -51,6 +51,14 @@ Execution mode: **subagent-driven** (decided 2026-07-29). First execution resume
 **Why**: The sheet is the foundation; nothing is playable without it. All five anims bake (`__sheetFor('barbarian')` has cast, canvas 640 wide); the sprite reads broader than the Sorceress, both hands on the axe, swing sweeps, death topples; console clean.
 
 **Next**: Task 2 (class data and plumbing). One parked finding rides along: the 450ms cold-bake gate fails at the pre-Barbarian baseline in this environment (557-561ms without him, ~590ms with; marginal cost ~25-30ms) — re-measured and adjudicated at Task 8 check 6.
+
+### Task 2 — Class data and plumbing (2026-07-29)
+
+**What**: `CLASS_STATS.barbarian`, `CLASS_TREES`/`TREE_NAME`, the `canAllocate` class gate, per-class tree panel, three new icon glyph branches, the Attack Speed sheet row, class-aware Kashya/Akara greetings via `populateTown(cls)`, inert player fields (`buffs`/`masteryPoints`/`ironSkinLevel`), `newGame(cls)` with the Hand Axe start, and `window.__newGame` — commit `4ab59fd`. Review Approved; call-site audits (populateTown, newGame, new Player) came back complete.
+
+**Why**: A Barbarian is now fully playable through `__newGame('barbarian')` — 55/10 orbs, Hand Axe swings kill moor monsters, three named empty tree columns, class greetings — with the Sorceress regression-checked (Fire Bolt, FCR row, her three columns). Console clean both passes.
+
+**Next**: Task 3 (class select on the title). Deferred minor on record: `CLASS_TREES[player.cls]` unguarded (plan-mandated; matters only if a third class lands).
 
 ---
 
