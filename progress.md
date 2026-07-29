@@ -147,7 +147,7 @@ this task's scope — recorded rather than quietly passed.
 Playwright driver — the browser extension used for the rest of this sweep refuses `file://`
 navigation outright, so it could not establish this leg itself. From that genuine file:// origin:
 loaded, baked, started a Barbarian, ran 300 simulation frames, walked into the Blood Moor and landed
-a real Bash swing (5.9 damage, mana spent exactly 2) through the same production input path used
+a real Bash swing (5.9 damage, mana spent ~2) through the same production input path used
 everywhere else in this sweep. Zero console messages, zero page errors. The same flow was also run
 earlier through `serve.js` (`http://localhost:8231/diablo.html`) with the same result and is kept as
 supplementary evidence of the bundle's deeper gameplay (a full Bash-to-kill sequence); the file://
