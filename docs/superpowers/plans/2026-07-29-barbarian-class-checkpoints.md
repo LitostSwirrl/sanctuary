@@ -181,3 +181,53 @@ After each task (post-completion checklist):
 3. Commit the checkpoints file (docs: checkpoint — ...).
 4. Only at a gate where the context window is worth shedding (~30%+ used) or the session is ending: generate the next task's resume prompt (self-contained, this same shape), pbcopy it silently, append it to the checkpoints file, commit, and tell the user it is safe to /clear. Otherwise continue in-session.
 ```
+
+---
+
+## Execution Resume Prompt (Task 8 onward)
+
+(2026-07-29, generated after Task 7 completed — Tasks 1-7 done, window at the shedding gate)
+
+```
+Continue the Barbarian build: Tasks 1-7 are done and committed; resume subagent-driven execution at Task 8 (the verification contract — ship gate), then the final whole-branch review.
+
+Working directory: /Users/jinsoon/Work/Projects/experiments/diablo
+
+State:
+- Plan: docs/superpowers/plans/2026-07-29-barbarian-class.md (9 tasks; its Global Constraints bind every task)
+- Checkpoints: docs/superpowers/plans/2026-07-29-barbarian-class-checkpoints.md (State block current through Task 7; per-task Log entries)
+- Done on main: Task 1 figure (272e7d9), Task 2 plumbing (4ab59fd), Task 3 title select (79fcb99), Task 4 melee path (7cf6975), Task 5 Leap/Whirlwind (47df38b), Task 6 warcries + monster status (8b8fb6b), Task 7 masteries (e202576). A docs checkpoint commit follows each. All seven task reviews came back Approved / spec PASS.
+- Pending: Task 8 (verification contract — the spec's ship gate: no new features; run the eight checks in a real browser, fix: commits where checks fail, verification record), then the SDD final whole-branch review (most capable model), then Task 9 (Nightmare, stretch — ONLY if Task 8 is fully green and there is room; else move that section to the README backlog per the plan and stop).
+- SDD workspace: .superpowers/sdd/2026-07-29-barbarian-class/ — progress.md is the ledger (completions, parked findings, deferred minors), task-N-brief.md / task-N-report.md per task. Whole-effort MERGE_BASE for the final review: c9ff6c1 (the ledger's recorded base).
+
+Before starting:
+1. Read the plan's Global Constraints, then Task 8 in full (and Task 9's gate paragraph).
+2. Read the checkpoints file's Cross-cutting contracts, then the ledger — tasks with a "complete" line are DONE, never re-dispatch them. Findings riding into Task 8 / final review:
+   - 450ms cold-bake gate (check 6): baseline WITHOUT the Barbarian measured 557-561ms in this environment; his marginal cost ~25-30ms. Task 8 re-measures and owns the budget adjudication (Task 1 ledger entry has the bisect).
+   - Vendor buy crash, pre-existing: the panels.js buy handler reads this.vendorStock while named-NPC stock lives on npc.stock; the purchase completes before the throw (Task 7 ledger note has the root cause). Out of Barbarian scope but a Barbarian playthrough can hit it (buying from Charsi). If Task 8's sweep hits it, adjudicate per the plan's own Task 8 text (fixes applied where checks fail — a separate fix: commit is legitimate); it is NOT a Barbarian regression and its console error predates the work.
+   - Double Swing's shared hit-frame gate: controller-ruled stands-as-designed (Task 4 ledger entry); final-review triage only.
+   - Deferred minors are all in the ledger — point the final reviewer at them for merge triage.
+3. Invoke superpowers:subagent-driven-development and resume its loop at Task 8.
+
+Goals:
+- Task 8 via one implementer subagent (model sonnet, general-purpose, synchronous, dispatched with the task brief + report path): it RUNS the eight checks end-to-end against serve.js, commits fix: commits where a check fails and the fix is in scope, and writes the verification record the brief asks for (README/progress record only if the repo convention expects one). Task review after (sonnet), scoped re-reviews on fix rounds.
+- Then the final whole-branch review: review-package PLAN c9ff6c1 HEAD; dispatch on the most capable available model using the requesting-code-review template (../requesting-code-review/code-reviewer.md relative to the SDD skill directory); point it at the ledger's deferred-minor and parked lines. If it returns findings: ONE fix dispatch with the complete list, exactly one scoped re-review, adjudicate residuals. When clean: rm -rf the SDD workspace, then superpowers:finishing-a-development-branch (work is ON main by prior agreement — no merge step, just the finish decision).
+- Task 9 only if Task 8 is fully green and room remains; else append the plan's Task 9 section to the README backlog per the plan and stop.
+- Subagents must WRITE files / RUN checks, not plan — instruct explicitly. Verify changes on disk; the implementer commits its own work.
+- Commits: Conventional Commits, trailer "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>".
+
+Conventions (session-proven; restate to subagents):
+- node serve.js from the project root serves http://localhost:8231/index.html. Check the port first (lsof -ti :8231); a running PID must be node serve.js with cwd = this checkout (ps -p PID -o command=; lsof -a -p PID -d cwd -Fn); if free, start node serve.js as a background Bash task. Never python http.server.
+- Browser checks: claude-in-chrome (Chrome DevTools MCP is blocked by a stale profile lock). Implementers invoke the claude-in-chrome skill, then ONE ToolSearch call loading tabs_context_mcp, tabs_create_mcp, navigate, computer, javascript_tool, read_console_messages. New tab each time; window.__forceLoad() first (backgrounded tabs throttle rAF to ~1fps); drive the sim with window.__step(1/60) + window.__render(); KEEP EVERY CHECK ATOMIC INSIDE ONE javascript_tool CALL — between tool calls the live rAF loop runs the game unsupervised and has dirtied the console before (Task 5 lesson). Clicks as real PointerEvents at computed canvas coordinates. Console clean at the end of every check.
+- window.__g is live state; window.__newGame(cls) and window.__save() exist. SKILLS array order (append-only) now ends: ...concentrate, leap, whirlwind, howl, shout, battlecry, battleorders, warcry, axemastery, macemastery, swordmastery, ironskin. Melee helpers and applyStun are module-local in src/game/skills.js; monsterDefense is exported from src/game/combat.js.
+- No emoji anywhere, including reviewer output — plain PASS / FAIL / CANNOT-VERIFY markers.
+- SDD scripts at /Users/jinsoon/.claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/skills/subagent-driven-development/scripts/ (task-brief, review-package, sdd-workspace). Record BASE (git rev-parse HEAD) before each dispatch; build reviewer diffs with review-package PLAN BASE HEAD; the reviewer gets three paths — brief, report, package — plus the plan's Global Constraints verbatim.
+
+Output: Task 8 verified and committed (with any fix: commits); final whole-branch review run and resolved; ledger and checkpoints kept current; Task 9 executed or moved to the README backlog per the gate.
+
+After each task (post-completion checklist):
+1. Mark the task done in the checkpoints State block with the date.
+2. Append a What/Why/Next entry to the checkpoints Log.
+3. Commit the checkpoints file (docs: checkpoint — ...).
+4. Only at a gate where the context window is worth shedding (~30%+ used) or the session is ending: generate the next resume prompt (self-contained, this same shape), pbcopy it silently, append it to the checkpoints file, commit, and tell the user it is safe to /clear. Otherwise continue in-session.
+```
