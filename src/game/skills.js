@@ -112,6 +112,13 @@ function knockback(level, m, fromX, fromY, dist) {
   m.moveBy((dx / d) * dist, (dy / d) * dist, level);
 }
 
+// Bosses are immune to fear and stun, as monsters are to neither chill nor
+// Static Field today.
+function applyStun(m, seconds) {
+  if (!m.alive || m.def.boss) return;
+  m.stunned = Math.max(m.stunned || 0, seconds);
+}
+
 // The two-handed axe reaches a little past the bare-hand attack's 1.6/1.7.
 const MELEE_REACH = 1.9;
 
@@ -467,6 +474,91 @@ export const SKILLS = [
       return meleeStrike(caster, tx, ty, ctx, (target) => {
         weaponHit(caster, target, ctx, { ed, ar: 30 + 5 * (lvl - 1) });
       });
+    },
+  },
+  {
+    id: 'leap', name: 'Leap', tree: 'combat', req: 6, prereq: [], melee: true, iconSeed: 2,
+    mana: () => 3,
+    blurb: 'Jump to a point. The landing throws everything nearby off its feet.',
+    effect: (l) => `Range ${(5 + 0.25 * (l - 1)).toFixed(2)} tiles, stuns ${(0.4 + 0.05 * (l - 1)).toFixed(2)}s on landing`,
+    cast(caster, lvl, tx, ty, ctx) {
+      const range = 5 + 0.25 * (lvl - 1);
+      const d = Math.hypot(tx - caster.x, ty - caster.y);
+      let gx = tx, gy = ty;
+      if (d > range) { gx = caster.x + (tx - caster.x) / d * range; gy = caster.y + (ty - caster.y) / d * range; }
+      const spot = ctx.level.nearestOpen(gx, gy, 4);
+      if (ctx.level.blockedCircle(spot.x, spot.y, caster.radius)) return false;
+      const from = { x: caster.x, y: caster.y };
+      const dur = 0.45;
+      let t = 0;
+      caster.stop();
+      caster.busy = dur + 0.1;
+      caster.face(spot.x, spot.y);
+      caster.setAnim('walk', { fps: 15 });
+      if (ctx.sfx) ctx.sfx('swing');
+      caster.action = (dt) => {
+        t += dt;
+        const k = Math.min(1, t / dur);
+        // Position ignores walls: a leap crosses what walking cannot. Only
+        // the landing point was validated.
+        caster.x = from.x + (spot.x - from.x) * k;
+        caster.y = from.y + (spot.y - from.y) * k;
+        caster.zOff = Math.sin(k * Math.PI) * 26;
+        if (k < 1) return false;
+        caster.zOff = 0;
+        caster.setAnim('idle', { force: true });
+        const stun = 0.4 + 0.05 * (lvl - 1);
+        for (const e of ctx.level.entities) {
+          if (!e.alive || e.isPlayer || e.isNpc) continue;
+          if (Math.hypot(e.x - caster.x, e.y - caster.y) > 1.5 + e.radius) continue;
+          knockback(ctx.level, e, caster.x, caster.y, 1.0);
+          applyStun(e, stun);
+        }
+        ctx.fx.ring(caster.x, caster.y, { maxR: 1.6, cr: 200, cg: 180, cb: 140, life: 0.3, w: 3, lit: 1 });
+        ctx.fx.burst('dust', caster.x, caster.y, 14, { z: 4, spread: 2.2, r: 150, g: 130, b: 100, life: 0.5 });
+        if (ctx.sfx) ctx.sfx('hit');
+        return true;
+      };
+      return true;
+    },
+  },
+  {
+    id: 'whirlwind', name: 'Whirlwind', tree: 'combat', req: 24, prereq: ['concentrate'], melee: true, iconSeed: 4,
+    mana: () => 12,
+    blurb: 'Become the storm. Travel, and everything on the way is hit.',
+    effect: (l) => `${-50 + 10 * (l - 1)}% Damage per hit, a hit every 0.15s en route`,
+    cast(caster, lvl, tx, ty, ctx) {
+      const dx = tx - caster.x, dy = ty - caster.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 0.5) return false;
+      const ux = dx / d, uy = dy / d;
+      const dist = Math.min(7, d);
+      const speed = 7.5;
+      const dur = dist / speed;
+      const ed = -50 + 10 * (lvl - 1);
+      let t = 0, hitT = 0, spinT = 0;
+      caster.stop();
+      caster.busy = dur + 0.05;
+      caster.setAnim('attack', { fps: 20 });        // looping spin
+      if (ctx.sfx) ctx.sfx('swing');
+      const finish = () => { caster.setAnim('idle', { force: true }); caster.busy = 0.1; return true; };
+      caster.action = (dt) => {
+        t += dt; hitT += dt; spinT += dt;
+        if (spinT > 0.07) { spinT = 0; caster.dir = (caster.dir + 1) % 8; }
+        const moved = caster.moveBy(ux * speed * dt, uy * speed * dt, ctx.level);
+        while (hitT >= 0.15) {
+          hitT -= 0.15;
+          for (const e of ctx.level.entities) {
+            if (!e.alive || e.isPlayer || e.isNpc) continue;
+            if (Math.hypot(e.x - caster.x, e.y - caster.y) > 1.5 + e.radius) continue;
+            weaponHit(caster, e, ctx, { ed });
+          }
+        }
+        // Stopping early at the first blocked tile is the D2 behaviour.
+        if (!moved || t >= dur) return finish();
+        return false;
+      };
+      return true;
     },
   },
 ];

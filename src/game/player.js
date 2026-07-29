@@ -79,6 +79,8 @@ export class Player extends Entity {
     this.moveGoal = null;
     this.busy = 0;                 // seconds locked in an attack or cast
     this.casting = null;
+    this.action = null;            // (dt) => boolean; a skill that owns the body for a moment
+    this.zOff = 0;                 // vertical draw offset in sprite pixels, while airborne
     this.leftSkill = 'attack';
     this.rightSkill = 'firebolt';
     this.hotkeys = {};
@@ -216,6 +218,10 @@ export class Player extends Entity {
   update(dt, level) {
     this.updateStatus(dt);
     if (!this.alive) { this.updateAnim(dt); return; }
+
+    // A skill that owns the body for a moment: Leap's flight, Whirlwind's
+    // travel. Ticks even while busy; clears itself when done.
+    if (this.action && this.action(dt)) this.action = null;
 
     if (this.busy > 0) {
       this.busy -= dt;

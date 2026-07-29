@@ -182,6 +182,7 @@ function enterArea(id, fromId, snapCamera) {
   }
   player.x = at.x; player.y = at.y;
   player.stop();
+  player.action = null; player.busy = 0; player.zOff = 0;
   player.target = null;
   pending = null;
   level.markExplored(player.x, player.y, 12);
@@ -331,6 +332,7 @@ function hurtPlayer(dmg, source) {
 function die() {
   player.hp = 0;
   player.alive = false;
+  player.action = null; player.zOff = 0;
   player.setAnim('death', { loop: false, force: true });
   state = 'dead';
   deathScreenT = 0;

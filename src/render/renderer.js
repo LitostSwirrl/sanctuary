@@ -188,7 +188,7 @@ export class Renderer {
 
     const ix = e.sheet.index(e.animName || 'idle', e.dir | 0, e.frame | 0);
     const dx = s.x - cw / 2;
-    const dy = s.y - e.sheet.footY * z;
+    const dy = s.y - e.sheet.footY * z - (e.zOff || 0) * z;
 
     ctx.save();
     if (e.alpha !== undefined && e.alpha < 1) ctx.globalAlpha = Math.max(0, e.alpha);
