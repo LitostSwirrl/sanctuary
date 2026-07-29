@@ -349,9 +349,18 @@ function strungDecay(ctx, freq, brightness, sustain, dur, attack, gain, steps = 
 // out from the very strings it is standing in for.
 const STRUNG_LEVEL = 0.42;
 
+// Loop gain has to stay under one or the string grows instead of ringing, and
+// over zero or there is no string and the logarithm below has nowhere to go. A
+// hand-written mood gets held inside that rather than trusted.
+const loopGain = (o) => Math.min(0.9995, Math.max(0.001, o.sustain ?? 0.985));
+
+// The loop filter's cutoff, which is also a divisor in the lag below and a
+// frequency the filter would complain about if it went negative.
+const cutoff = (o) => Math.max(20, o.brightness || 2600);
+
 function struck(ctx, bus, when, freq, o = {}) {
   const dur = o.dur || 1.2;
-  const brightness = o.brightness || 2600;
+  const brightness = cutoff(o);
   const gain = o.gain ?? 0.16;
   const attack = 0.004;
   const osc = ctx.createOscillator();
@@ -365,7 +374,7 @@ function struck(ctx, bus, when, freq, o = {}) {
   g.gain.setValueAtTime(0, when);
   g.gain.linearRampToValueAtTime(gain * STRUNG_LEVEL, when + attack);
   g.gain.setValueCurveAtTime(
-    strungDecay(ctx, freq, brightness, o.sustain ?? 0.985, dur, attack, gain),
+    strungDecay(ctx, freq, brightness, loopGain(o), dur, attack, gain),
     when + attack, dur - attack);
   osc.connect(damp); damp.connect(g); g.connect(bus);
   osc.start(when);
@@ -377,7 +386,12 @@ function struck(ctx, bus, when, freq, o = {}) {
 // trip around the loop is one period of the note, which is what sets the pitch;
 // brightness is the loop filter's cutoff.
 function pluck(ctx, bus, when, freq, o = {}) {
-  const brightness = o.brightness || 2600;
+  // A note with no pitch, no length or no level is not a note. Moods are
+  // written by hand and silencing a voice with gain: 0 while composing is an
+  // obvious thing to reach for, so take it at its word and schedule nothing —
+  // every number below is about to be divided by one of these.
+  if (!(freq > 0) || !((o.gain ?? 0.16) > 0) || !((o.dur || 1.2) > 0)) return;
+  const brightness = cutoff(o);
   // What the loop costs before any delay is written into it: one render block
   // for the cycle, plus the damping filter's own group delay. Both have to come
   // out of the delay or the string plays flat — measured an octave flat at
@@ -403,7 +417,7 @@ function pluck(ctx, bus, when, freq, o = {}) {
   damp.frequency.value = brightness;
   damp.Q.value = FLAT_Q;
   const fb = ctx.createGain();
-  const sustain = o.sustain ?? 0.985;          // loop gain < 1 or it rings forever
+  const sustain = loopGain(o);                 // loop gain < 1 or it rings forever
   fb.gain.setValueAtTime(sustain, when);
   const out = ctx.createGain();
   out.gain.setValueAtTime(o.gain ?? 0.16, when);
@@ -522,18 +536,21 @@ const PITCHED = {
 };
 const PERC = { drum: mthump, shaker };
 
-// A mood names its voices as strings, so one typo in a mood table would throw
-// inside the scheduler tick — and that tick is a timer callback, so the throw
-// would take the pump down with it and the music would stop for good. Say what
-// is missing once, then carry on without that voice.
-const unnamed = new Set();
+// Mood tables are written by hand, and everything that reads one is inside a
+// timer callback: a throw there takes the pump down and the music stops for
+// good. So the scheduler complains rather than throws — but a tick runs several
+// times a second, so it may only complain once.
+const said = new Set();
+function once(message) {
+  if (said.has(message)) return;
+  said.add(message);
+  console.warn(message);
+}
+
 function voice(table, kind) {
   const fn = table[kind];
   if (fn) return fn;
-  if (!unnamed.has(kind)) {
-    unnamed.add(kind);
-    console.warn(`synth: a mood asks for a voice named "${kind}", which does not exist`);
-  }
+  once(`synth: a mood asks for a voice named "${kind}", which does not exist`);
   return null;
 }
 
@@ -652,6 +669,17 @@ export function scheduleBar(ctx, bus, key, barIndex, t) {
   if (!m) return 1;
   const beat = 60 / m.tempo;
   const barLen = beat * m.beats;
+  // Everything that asks for a bar then adds the answer to a clock and asks for
+  // the next one. A bar of no length, from a missing or mistyped tempo, would
+  // leave that clock where it was and the caller would sit asking for the same
+  // bar until the tab froze — worse than a thrown error, because nothing says
+  // what happened. A tempo of zero is the other way round: an infinitely long
+  // bar, and every note in it scheduled at infinity. Hand back a second of
+  // silence for both.
+  if (!Number.isFinite(barLen) || barLen <= 0) {
+    once(`synth: mood "${key}" has no usable tempo, so it has no bars to play`);
+    return 1;
+  }
   const v = m.voices;
 
   if (v.wind) wind(ctx, bus, t, barLen, v.wind);
