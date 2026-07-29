@@ -204,7 +204,9 @@ export function tickHazards(ctx, dt) {
 
     h.t += dt;
     if (h.t < h.tick) continue;
-    h.t = 0;
+    // The overshoot carries, so `dps` is the damage it actually deals rather
+    // than a promise the frame rate quietly shaves a slice off every bite.
+    h.t -= h.tick;
     for (const e of ctx.level.entities) {
       if (!e.alive || e.isPlayer || e.isNpc) continue;
       if (Math.hypot(e.x - h.x, e.y - h.y) > h.r + e.radius) continue;
@@ -271,8 +273,10 @@ export function tickPets(ctx, dt) {
     p.cool -= dt;
     if (p.cool > 0) continue;
     const t = nearestWaked(ctx, p.x, p.y, 11);
-    if (!t) continue;
-    p.cool = p.rate;
+    // Standing idle banks no debt; without this the overshoot carried below
+    // would pay for a burst of shots the moment something walked into range.
+    if (!t) { p.cool = 0; continue; }
+    p.cool += p.rate;
     const a = aimVector(p, t.x, t.y, 14);
     ctx.projectiles.spawn({
       x: p.x, y: p.y, z: 14, vx: a.vx, vy: a.vy, speed: 14,
