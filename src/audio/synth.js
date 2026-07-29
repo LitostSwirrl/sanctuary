@@ -349,14 +349,22 @@ function strungDecay(ctx, freq, brightness, sustain, dur, attack, gain, steps = 
 // out from the very strings it is standing in for.
 const STRUNG_LEVEL = 0.42;
 
+// A written value only counts if it is a finite number; anything else takes
+// the default instead. Math.min and Math.max pass NaN straight through, so a
+// bare clamp launders nonsense rather than rejecting it.
+const finiteOr = (x, d) => (Number.isFinite(x) ? x : d);
+
 // Loop gain has to stay under one or the string grows instead of ringing, and
 // over zero or there is no string and the logarithm below has nowhere to go. A
-// hand-written mood gets held inside that rather than trusted.
-const loopGain = (o) => Math.min(0.9995, Math.max(0.001, o.sustain ?? 0.985));
+// hand-written mood gets held inside that rather than trusted — and a sustain
+// that is not a number at all takes the default, because the clamp alone
+// would launder NaN through to the feedback gain.
+const loopGain = (o) => Math.min(0.9995, Math.max(0.001, finiteOr(o.sustain, 0.985)));
 
 // The loop filter's cutoff, which is also a divisor in the lag below and a
-// frequency the filter would complain about if it went negative.
-const cutoff = (o) => Math.max(20, o.brightness || 2600);
+// frequency the filter would complain about if it went negative. Unwritten,
+// zero and non-finite all take the default; a negative is floored.
+const cutoff = (o) => Math.max(20, finiteOr(o.brightness || 2600, 2600));
 
 function struck(ctx, bus, when, freq, o = {}) {
   const dur = o.dur || 1.2;
@@ -570,18 +578,34 @@ const usable = (x) => (Number.isFinite(x) && x > 0 ? x : null);
 // A new entry in PITCHED needs a line here too.
 const DEFAULT_GAIN = { pluck: 0.16, pad: 0.04, bell: 0.06, sine: 0.08, saw: 0.08 };
 
+// Every numeric field the voices consume, and what the dispatch layer
+// requires of a mood that writes one. gain and dur must be positive: zero is
+// a composer muting the part, and a note of no length is no note. attack may
+// be zero — a hard onset — but not negative, which would ask a ramp to end
+// before it starts. The frequencies must be positive: a negative filter
+// cutoff would be platform-clamped to nothing and silence the note with no
+// explanation. The rest only need to be finite numbers — sign belongs to the
+// voices' own clamps. Anything outside its rule — NaN, Infinity, a string,
+// an array where a number belongs — would reach an AudioParam as non-finite
+// and throw inside the scheduler's timer.
+const PART_FIELDS = {
+  gain: 'positive', dur: 'positive', attack: 'zero-or-more',
+  filter: 'positive', f0: 'positive', f1: 'positive',
+  detune: 'finite', q: 'finite', sustain: 'finite', brightness: 'finite',
+};
+
 // What a mood writes for a part is checked here before any voice sees it.
 // Unwritten fields are fine — every voice has its own fallback — and a dur
 // range is drawn and checked per note in scheduleBar instead. A written value
-// that is zero, negative or not a finite number silences the part: gain 0 is
-// a composer muting it, the rest are typos, and either way the number would
-// otherwise come out of the arithmetic as NaN inside the scheduler's timer,
-// where the throw kills the pump and the music stops for good. The part sits
-// the music out, and says so once.
+// that breaks its field's rule silences the part and says so once, because
+// the alternative is a throw inside the scheduler's timer, which kills the
+// pump and stops the music for good.
 function partCheck(key, part, o) {
-  for (const field of ['gain', 'dur']) {
+  for (const [field, need] of Object.entries(PART_FIELDS)) {
     const x = o[field];
-    if (x == null || Array.isArray(x) || usable(x)) continue;
+    if (x == null || (field === 'dur' && Array.isArray(x))) continue;
+    if (Number.isFinite(x) &&
+        (need === 'finite' || (need === 'positive' ? x > 0 : x >= 0))) continue;
     once(`synth: mood "${key}" writes ${part} ${field}: ${x}, so the ${part} is silent`);
     return false;
   }
