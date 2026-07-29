@@ -8,6 +8,9 @@ every sprite, tile, item icon and sound effect is computed at load time.
 - Spec: `docs/superpowers/specs/2026-07-28-diablo-vertical-slice-design.md`
 - Plan: `docs/superpowers/plans/2026-07-28-diablo-vertical-slice.md`
 - Checkpoints: `docs/superpowers/plans/2026-07-28-diablo-vertical-slice-checkpoints.md`
+- Barbarian spec: `docs/superpowers/specs/2026-07-29-barbarian-class-design.md`
+- Barbarian plan: `docs/superpowers/plans/2026-07-29-barbarian-class.md`
+- Barbarian checkpoints: `docs/superpowers/plans/2026-07-29-barbarian-class-checkpoints.md`
 
 ## Status
 
@@ -29,6 +32,7 @@ every sprite, tile, item icon and sound effect is computed at load time.
 | 14 | Packaging and README | done | 303KB single file, 0 external refs, runs and plays |
 | 15 | Audit: every button, NPC, skill and attack | done | see the pass below; 346KB single file |
 | 16 | Encampment decor, generator fix, deploy | done | 720 levels generated, 0 unreachable exits |
+| 17 | Barbarian: second class, ship-gate verification | done | 8/8 spec checks pass in a real browser; one pre-existing vendor bug found and fixed |
 
 ## What works right now
 
@@ -96,12 +100,56 @@ The loading bar no longer counts art by hand. `TILE_BAKE_STEPS`, `FIGURE_BAKE_ST
 `ICON_BAKE_STEPS` are derived from the data, so adding a prop or a figure can no longer make it
 lie. Measured cold load on this machine: 358 ms to the title screen, 103 bake steps.
 
+## The Barbarian, and what the ship gate found
+
+A second playable class: Warcries, Combat and Masteries, fourteen skills against the Sorceress's
+fourteen, chosen from a class-select screen New Game never asked before. He plays melee — weapon
+damage, attack rating against defence, Bash bound to the right button the way Fire Bolt is for her.
+Leap and Whirlwind move him the way Teleport moves her; warcries are casts that fear a pack, stun
+one, or change the character sheet for a printed duration rather than doing damage at all.
+
+The class shipped through the same eight-check verification contract the design spec wrote for it,
+run end to end in a real browser against `serve.js`, not read off the source. A new Barbarian starts
+55/55 life, 10/10 mana, Hand Axe equipped, and connects (damage floats, kills) and misses — a
+forced-defence probe confirmed the miss branch sits exactly on the formula's 5% floor — with the
+same `chanceToHit` the Sorceress swings by. All fourteen skills allocate under their level and
+prereq gates, cost their printed mana, and do what their tooltip says: Bash knocks a target back
+before its own AI starts closing the gap again; Leap lands on the aimed tile or refuses into a
+genuine wall mass with no mana spent; Whirlwind hits everything within 1.5 tiles along its line and
+stops early at the first blocked tile, exactly as the original does; Howl routs a non-boss pack
+while a boss shrugs it off; Shout and Battle Orders change the sheet by their exact formula and
+revert at their exact printed duration, clamping life and mana down on expiry; the three weapon
+masteries and Iron Skin move the sheet only for the weapon kind actually in hand. The Sorceress came
+through untouched: her save Continues, her tree panel still shows three columns, Fire Bolt still
+casts and kills, her sheet still reads Faster Cast Rate. A mid-run save round trip — fourteen skills
+spent, custom left/right bindings set through the real skill-tree and skill-picker panels, an active
+buff, the Hand Axe worn — came back byte for byte except the buff, which the save format never
+carried and so correctly did not return.
+
+One bug came out of it, and it was not his: buying anything from a named vendor (Charsi, Akara,
+Gheed) threw `TypeError: Cannot read properties of null (reading 'filter')` after the gold was
+already spent and the item already in the bag, because the buy handler always wrote back to
+`this.vendorStock`, which stays `null` for a real NPC — their stock lives on the NPC itself.
+Reproduced live while buying a Club and a Short Sword to prove Mace and Sword Mastery actually swap
+with the weapon in hand, then fixed to read whichever place really holds the stock
+(`src/ui/panels.js`).
+
+Performance held up under him: Whirlwind live inside a 51-monster Den of Evil scene measured 1.9 ms
+median, 3.8 ms at p95, against a 16.67 ms budget. Cold bake did not: five fresh reloads measured
+570-598 ms against the spec's 450 ms target. This was isolated back in Task 1 — the Sorceress-only
+baseline on this machine already measures 557-561 ms, so the Barbarian's own share is roughly
+25-30 ms, proportionate to being the eighteenth figure baked. The shortfall predates this class and
+belongs to the shared baking pipeline in this sandboxed environment, not to anything fixable inside
+this task's scope — recorded rather than quietly passed.
+
 ## Measurements
 
 | What | Result |
 |------|--------|
 | Bake all art (11 figures, 7 terrains, 12 props) | 545 ms |
+| Bake all art (18 figures, 7 terrains, 18 props, 217 icons), Barbarian added | 570-598 ms (5 fresh reloads, median 587 ms) |
 | Frame time, 3840x1858, 27 entities, 1075 drawables | 1.8 ms median, 5.9 ms worst |
+| Frame time, Whirlwind live, 51-monster Den of Evil | 1.9 ms median, 3.8 ms at p95, budget 16.67 ms |
 | Level generation | 1-17 ms per area |
 | Line of sight, random open pairs in a dungeon | 13.1% clear — routes go around obstacles |
 

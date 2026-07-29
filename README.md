@@ -52,10 +52,12 @@ something outside the panel and it lands on the floor.
 
 Six areas — Rogue Encampment, Blood Moor, Den of Evil, Cold Plains, Burial Grounds, Catacombs —
 generated from a seed, ending at Andariel. Nine monster types plus three bosses, with champion and
-unique packs that carry modifiers like Extra Fast and Cold Enchanted. Fourteen Sorceress skills
-across three trees with real synergies: points in Fire Bolt raise Fire Ball's damage. Fifty-three
-item bases across seven weapon classes, sixty affixes gated by item level, sixteen fixed uniques,
-and a grid inventory that honours item footprints.
+unique packs that carry modifiers like Extra Fast and Cold Enchanted. Two playable classes,
+Sorceress and Barbarian, with twenty-eight skills across six trees — the Sorceress's three have real
+synergies (points in Fire Bolt raise Fire Ball's damage), the Barbarian's three trade synergy for
+weapon mastery and warcries that root a pack in fear or leave it stunned. Fifty-three item bases
+across seven weapon classes, sixty affixes gated by item level, sixteen fixed uniques, and a grid
+inventory that honours item footprints.
 
 Six people stand in the encampment and each of them does something. Akara heals you and sells
 casting gear; Charsi deals in steel; Gheed gambles, which is to say you buy the base type and find
@@ -116,9 +118,11 @@ Dependencies run one way: `core` → `art`/`audio` → `items` → `world`/`game
 | What | Result |
 |------|--------|
 | Generate all art (17 figures, 7 terrains, 18 props, 217 icons) | 358 ms to the title screen |
+| Generate all art (18 figures, Barbarian added) | 570-598 ms to the title screen (5 fresh reloads, median 587 ms — see progress.md) |
 | Frame time, 2400x1472, Catacombs | 0.9 ms median, 1.3 ms at p95, budget 16.67 ms |
+| Frame time, Whirlwind live, 51-monster Den of Evil | 1.9 ms median, 3.8 ms at p95, budget 16.67 ms |
 | Level generation | 1–17 ms per area |
-| Standalone bundle | 346 KB, 36 modules, one file |
+| Standalone bundle | 369 KB, 36 modules, one file |
 
 ## Notes
 
