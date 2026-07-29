@@ -54,8 +54,9 @@ Six areas — Rogue Encampment, Blood Moor, Den of Evil, Cold Plains, Burial Gro
 generated from a seed, ending at Andariel. Nine monster types plus three bosses, with champion and
 unique packs that carry modifiers like Extra Fast and Cold Enchanted. Two playable classes,
 Sorceress and Barbarian, with twenty-eight skills across six trees — the Sorceress's three have real
-synergies (points in Fire Bolt raise Fire Ball's damage), the Barbarian's three trade synergy for
-weapon mastery and warcries that root a pack in fear or leave it stunned. Fifty-three item bases
+synergies (points in Fire Bolt raise Fire Ball's damage), the Barbarian's trees lean on weapon
+masteries and warcries that root a pack in fear or leave it stunned, with two synergies of their own
+(Bash feeds Concentrate; Howl and Battle Cry feed War Cry). Fifty-three item bases
 across seven weapon classes, sixty affixes gated by item level, sixteen fixed uniques, and a grid
 inventory that honours item footprints.
 

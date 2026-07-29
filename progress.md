@@ -32,7 +32,7 @@ every sprite, tile, item icon and sound effect is computed at load time.
 | 14 | Packaging and README | done | 303KB single file, 0 external refs, runs and plays |
 | 15 | Audit: every button, NPC, skill and attack | done | see the pass below; 346KB single file |
 | 16 | Encampment decor, generator fix, deploy | done | 720 levels generated, 0 unreachable exits |
-| 17 | Barbarian: second class, ship-gate verification | done | 8/8 spec checks pass in a real browser; one pre-existing vendor bug found and fixed |
+| 17 | Barbarian: second class, ship-gate verification | done | 7/8 spec checks pass outright; cold bake over budget (570-598 ms vs 450 ms, pre-existing per Task 1's baseline bisect — see Measurements); one pre-existing vendor bug found and fixed |
 
 ## What works right now
 
@@ -141,6 +141,17 @@ baseline on this machine already measures 557-561 ms, so the Barbarian's own sha
 25-30 ms, proportionate to being the eighteenth figure baked. The shortfall predates this class and
 belongs to the shared baking pipeline in this sandboxed environment, not to anything fixable inside
 this task's scope — recorded rather than quietly passed.
+
+`node build.js` bundles clean at 369 KB across 36 modules. Opened directly off disk
+(`file:///.../diablo.html`, `location.protocol` confirmed `'file:'`) through a headless-Chromium
+Playwright driver — the browser extension used for the rest of this sweep refuses `file://`
+navigation outright, so it could not establish this leg itself. From that genuine file:// origin:
+loaded, baked, started a Barbarian, ran 300 simulation frames, walked into the Blood Moor and landed
+a real Bash swing (5.9 damage, mana spent exactly 2) through the same production input path used
+everywhere else in this sweep. Zero console messages, zero page errors. The same flow was also run
+earlier through `serve.js` (`http://localhost:8231/diablo.html`) with the same result and is kept as
+supplementary evidence of the bundle's deeper gameplay (a full Bash-to-kill sequence); the file://
+run is what actually proves the single-file, no-server claim.
 
 ## Measurements
 
