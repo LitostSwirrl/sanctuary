@@ -297,8 +297,8 @@ const FLAT_Q = -3.0103;
 // Audio is computed 128 frames at a time, and a feedback loop carries a whole
 // block of that latency on top of whatever delay is written into it. A string's
 // loop is one period long, so the block is also its pitch ceiling: once a
-// period is shorter than the loop's own latency there is no delay left to
-// shorten. That lands near 360 Hz at 48 kHz and 170 Hz in a 22050 Hz render.
+// period is barely longer than the loop's own latency there is no delay left to
+// shorten. That lands near 325 Hz at 48 kHz and 152 Hz in a 22050 Hz render.
 // Nothing complains past it — the note just plays flat, by an octave at 220 Hz
 // and worse above — so pluck asks the context where its ceiling is and hands
 // anything above it to a struck tone, leaving a mood table free to write
@@ -306,21 +306,67 @@ const FLAT_Q = -3.0103;
 const BLOCK = 128;
 
 // What a pluck becomes above that ceiling: a triangle struck and left to decay
-// under the same lowpass colour, on the same envelope. No string behind it,
-// nothing recirculating — but it starts hard, dies away, and is in tune.
+// under the same lowpass colour. No string behind it, nothing recirculating —
+// but it starts hard, dies away on the decay the string would have had, and it
+// is in tune.
+//
+// Borrowing the decay is the whole point. A string loses its brightness before
+// it loses its note, because every harmonic goes round the loop at its own
+// rate: `sustain` times whatever the damping filter passes at that harmonic, a
+// trip being one period. The high ones sit where the filter bites and are gone
+// in a few passes; the fundamental rings on underneath. Add up the harmonics
+// the filter keeps and that is the shape a pluck actually loses its energy in —
+// steep at first, then long. Without it a struck note would hold its level for
+// the whole of dur and stand 20 dB above the string a semitone below it.
+function strungDecay(ctx, freq, brightness, sustain, dur, attack, gain, steps = 96) {
+  const keeps = Math.min(Math.round(brightness / freq), Math.floor(ctx.sampleRate / 2 / freq));
+  const n = Math.max(2, keeps);
+  const rate = [];
+  for (let h = 1; h <= n; h++) {
+    const pass = sustain / Math.sqrt(1 + Math.pow((h * freq) / brightness, 4));
+    rate.push(2 * freq * Math.log(pass));      // energy lost per second
+  }
+  const curve = new Float32Array(steps);
+  for (let i = 0; i < steps; i++) {
+    // Curve time runs from the end of the attack, but both the loop and the
+    // note's fade have been running since the note began.
+    const t = attack + (dur - attack) * (i / (steps - 1));
+    let e = 0;
+    for (const r of rate) e += Math.exp(r * t);
+    // The note's own fade rides on top: the same curve a string's output gain
+    // carries, which is set by the gain the mood asked for, not by the trimmed
+    // level this voice plays at.
+    curve[i] = gain * STRUNG_LEVEL * Math.sqrt(e / n) * Math.pow(0.0001 / gain, t / dur);
+  }
+  return curve;
+}
+
+// A string never delivers the level its output gain asks for. The loop is
+// seeded with one period of noise and then left alone, so what reaches the bus
+// is a good deal less than a driven oscillator at the same gain would send.
+// Measured across the pitches, brightnesses and note lengths these moods use,
+// the gap is about 7.5 dB, and a struck tone is trimmed by it or it would stand
+// out from the very strings it is standing in for.
+const STRUNG_LEVEL = 0.42;
+
 function struck(ctx, bus, when, freq, o = {}) {
   const dur = o.dur || 1.2;
+  const brightness = o.brightness || 2600;
+  const gain = o.gain ?? 0.16;
+  const attack = 0.004;
   const osc = ctx.createOscillator();
   osc.type = 'triangle';
   osc.frequency.value = freq;
   const damp = ctx.createBiquadFilter();
   damp.type = 'lowpass';
-  damp.frequency.value = o.brightness || 2600;
+  damp.frequency.value = brightness;
   damp.Q.value = FLAT_Q;
   const g = ctx.createGain();
-  g.gain.setValueAtTime(0.0001, when);
-  g.gain.linearRampToValueAtTime(o.gain ?? 0.16, when + 0.004);
-  g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(gain * STRUNG_LEVEL, when + attack);
+  g.gain.setValueCurveAtTime(
+    strungDecay(ctx, freq, brightness, o.sustain ?? 0.985, dur, attack, gain),
+    when + attack, dur - attack);
   osc.connect(damp); damp.connect(g); g.connect(bus);
   osc.start(when);
   osc.stop(when + dur + 0.05);
@@ -338,7 +384,12 @@ function pluck(ctx, bus, when, freq, o = {}) {
   // 220 Hz, and further the higher the note, until this was subtracted.
   const lag = BLOCK / ctx.sampleRate + Math.SQRT2 / (2 * Math.PI * brightness);
   const period = 1 / freq;
-  if (period - lag < 1 / ctx.sampleRate) { struck(ctx, bus, when, freq, o); return; }
+  // A string that owns less than a tenth of its own period is barely a string:
+  // the loop is nearly all latency, a few samples of delay line get seeded with
+  // a whole period of noise and overwrite themselves, and the level that comes
+  // out wanders several dB between one note and the next. Hand those over too,
+  // rather than defend a sound that is neither one thing nor the other.
+  if (period - lag < period * 0.1) { struck(ctx, bus, when, freq, o); return; }
   const dur = o.dur || 1.2;
   const burst = ctx.createBufferSource();
   burst.buffer = noiseBufferFor(ctx);
