@@ -265,4 +265,38 @@ export const FX = {
     fx.burst('glow', x, y, 16, { z: 16, spread: 2.6, spreadZ: 26, r: 170, g: 110, b: 255, life: 0.4 });
     fx.ring(x, y, { maxR: 1.8, cr: 180, cg: 120, cb: 255, life: 0.3, w: 3, lit: 1.4 });
   },
+
+  // A patch of ground that keeps working: Fire Wall's flames, Blizzard's
+  // falling ice, Grim Ward's reek. Called on a cadence while the hazard lives
+  // rather than once, which is what makes it read as sustained.
+  hazard(fx, x, y, r, element) {
+    const a = Math.random() * Math.PI * 2;
+    const d = Math.sqrt(Math.random()) * r;
+    const px = x + Math.cos(a) * d, py = y + Math.sin(a) * d;
+    if (element === 'cold') {
+      // Thrown high and dropped, so the ice arrives rather than appears.
+      fx.spawn('ice', px, py, { z: 34 + Math.random() * 22, vz: -46, spread: 0.2, spreadZ: 4, r: 160, g: 226, b: 255, size: 2.2, life: 0.55, lit: 0.8 });
+    } else if (element === 'fire') {
+      fx.spawn('ember', px, py, { z: 2, vz: 16, spread: 0.4, spreadZ: 8, r: 255, g: 140, b: 45, size: 2.6, life: 0.5, lit: 1.2 });
+    } else {
+      fx.spawn('smoke', px, py, { z: 4, spread: 0.5, spreadZ: 8, r: 92, g: 84, b: 72, life: 0.9 });
+    }
+  },
+
+  // An instant strike down a line. Three overlapping arcs of falling width read
+  // as one thick, ragged bolt.
+  beam(fx, x0, y0, x1, y1, element) {
+    const c = element === 'fire' ? [255, 150, 60] : element === 'cold' ? [150, 220, 255] : [180, 210, 255];
+    for (let i = 0; i < 3; i++) {
+      fx.arc(x0, y0, x1, y1, { z: 14, w: 3 - i, r: c[0], g: c[1], b: c[2], life: 0.22, jitter: 0.5 + i * 0.35, segs: 11 });
+    }
+    fx.ring(x1, y1, { maxR: 1.2, cr: c[0], cg: c[1], cb: c[2], life: 0.26, w: 2, lit: 1.4 });
+  },
+
+  // The standing glow of a planted thing — a Hydra's heads, a Grim Ward's
+  // totem. Nothing here is baked: the light is the sprite.
+  totem(fx, x, y, element) {
+    const c = element === 'cold' ? [150, 220, 255] : element === 'phys' ? [206, 192, 150] : [255, 150, 50];
+    fx.spawn('ember', x, y, { z: 8, vz: 18, spread: 0.5, spreadZ: 12, r: c[0], g: c[1], b: c[2], size: 2.8, life: 0.5, lit: 2 });
+  },
 };

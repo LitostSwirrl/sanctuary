@@ -4,6 +4,14 @@
 // Frozen Orb sheds. Each one carries its own hit and expiry callbacks, so a
 // Fire Ball is a projectile that happens to explode rather than a special case
 // in the update loop.
+//
+// Two opts do more than describe a bolt. `chain: n` re-aims at the nearest
+// thing this bolt has not touched, n times — Chain Lightning. `weapon: true`
+// resolves the hit from the owner's weapon numbers instead of a fixed roll, and
+// `thrown: true` says it is steel rather than magic, so it neither glows nor
+// lights the room.
+
+import { weaponHit } from './skills.js';
 
 export class Projectiles {
   constructor() { this.list = []; }
@@ -19,12 +27,16 @@ export class Projectiles {
       radius: o.radius ?? 0.3,
       element: o.element || 'fire',
       min: o.min || 1, max: o.max || 2,
-      colour: o.colour || '#ffb040',
+      colour: o.colour || (o.thrown ? '#c6ccd6' : '#ffb040'),
       core: o.core || '#ffffff',
-      drawR: o.drawR ?? 5,
-      light: o.light ?? 4.5,
+      drawR: o.drawR ?? (o.thrown ? 3 : 5),
+      light: o.light ?? (o.thrown ? 0 : 4.5),
       hostile: !!o.hostile,
       owner: o.owner || null,
+      chain: o.chain || 0,
+      thrown: !!o.thrown,
+      weapon: !!o.weapon,
+      ed: o.ed || 0, ar: o.ar || 0, mul: o.mul ?? 1,
       pierce: o.pierce || 0,
       homing: o.homing || 0,
       gravity: o.gravity || 0,
@@ -66,6 +78,10 @@ export class Projectiles {
       p.z += p.vz * dt;
 
       if (p.trail) p.trail(p, dt);
+      // Thrown steel has no glow of its own, so it gets a glint instead.
+      if (p.thrown && ctx.fx && Math.random() < 0.5) {
+        ctx.fx.spawn('spark', p.x, p.y, { z: p.z, spread: 0.25, spreadZ: 3, r: 200, g: 210, b: 226, size: 1.6, life: 0.18 });
+      }
 
       // Walls stop everything.
       if (level.blocked(p.x, p.y)) {
@@ -90,7 +106,10 @@ export class Projectiles {
           const d = Math.hypot(e.x - p.x, e.y - p.y);
           if (d >= p.radius + e.radius) continue;
           p.hitList.add(e);
+          if (p.weapon && p.owner) weaponHit(p.owner, e, ctx, { ed: p.ed, ar: p.ar, mul: p.mul });
           if (p.onHit) p.onHit(p, e);
+          // A chaining bolt leaves this one still flying, aimed elsewhere.
+          if (p.chain > 0 && rechain(p, ctx)) break;
           if (p.pierce-- <= 0) { this.finish(p, i, ctx, e); consumed = true; break; }
         }
         if (consumed) continue;
@@ -115,6 +134,26 @@ export class Projectiles {
     }
     return out;
   }
+}
+
+// Hop to the nearest thing this bolt has not already touched. Returns false
+// when there is nothing left, which lets the hit resolve normally instead.
+function rechain(p, ctx) {
+  const t = nearestTarget(ctx, p);
+  if (!t) return false;
+  p.chain--;
+  const dx = t.x - p.x, dy = t.y - p.y;
+  const d = Math.hypot(dx, dy) || 1;
+  p.vx = (dx / d) * p.speed;
+  p.vy = (dy / d) * p.speed;
+  // The hop has to be able to arrive: a bolt near the end of its life would
+  // otherwise expire between two enemies standing a tile apart.
+  p.ttl = Math.max(p.ttl, d / p.speed + 0.15);
+  if (ctx.fx) {
+    const c = hexToTriple(p.colour);
+    ctx.fx.arc(p.x, p.y, t.x, t.y, { z: p.z, w: 2, r: c[0], g: c[1], b: c[2] });
+  }
+  return true;
 }
 
 function nearestTarget(ctx, p) {

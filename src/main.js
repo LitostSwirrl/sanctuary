@@ -18,13 +18,17 @@ import { generate } from './world/gen.js';
 import { Renderer } from './render/renderer.js';
 import { drawMinimap } from './render/minimap.js';
 import { Player } from './game/player.js';
-import { applyDamage, applyChill, rollHit, rollDamage, monsterDefense, tickBurn, xpPenalty, xpForLevel, LEVEL_CAP } from './game/combat.js';
+import { applyDamage, applyChill, onStruck, rollHit, rollDamage, monsterDefense, tickBurn, xpPenalty, xpForLevel, LEVEL_CAP } from './game/combat.js';
 import { populate, spawnBoss, Monster } from './game/monster.js';
 import { populateTown } from './game/npc.js';
-import { updateAI } from './game/ai.js';
+import { updateAI, taunt } from './game/ai.js';
 import { dropLoot, dropFromContainer, pickUp, addToInventory, groundItem, scatterWorldItems } from './game/loot.js';
 import { Projectiles } from './game/projectile.js';
-import { castSkill, allocate, refreshPassives, SKILL_BY_ID, SKILLS, CLASS_TREES } from './game/skills.js';
+import {
+  castSkill, allocate, refreshPassives, SKILL_BY_ID, SKILLS, CLASS_TREES,
+  tickHazards, tickPets, tickBuffs, nearestCorpse,
+  addHazard, addPet, beam, addStack, stackCount, consumeCorpse,
+} from './game/skills.js';
 import { makeGold, rollItem, forgeItem, makePotion } from './items/item.js';
 import { UNIQUE_BY_NAME } from './items/uniques.js';
 import { UI } from './ui/panels.js';
@@ -330,14 +334,18 @@ const gctx = {
 
   meleeHit(m) {
     if (m.distTo(player) > m.attackRange + 0.6) return;
-    if (!rollHit(rng, m.attackRating, player.defense, m.mlvl, player.level)) {
+    // A taunted monster swings wilder and weaker than its sheet says.
+    const tn = m.taunt;
+    if (!rollHit(rng, m.attackRating * (tn ? 1 - tn.arDebuff : 1), player.defense, m.mlvl, player.level)) {
       fx.float(player.x, player.y, 'miss', 'rgba(190,190,190,1)');
       return;
     }
-    const raw = m.rollDamage(rng);
+    const raw = m.rollDamage(rng) * (tn ? 1 - tn.dmgDebuff : 1);
     const dmg = { phys: raw };
     if (m.enchant) dmg[m.enchant] = raw * 0.5;
     hurtPlayer(dmg, m);
+    // The armour buffs answer the blow that landed.
+    if (player.alive) onStruck(player, m, gctx);
   },
 
   novaHit(m, o) {
@@ -490,6 +498,13 @@ function servePending() {
 // the two need different fallbacks at the click site.
 function doCast(id, tx, ty) {
   if (!id || id === 'attack') return 'locked';
+  // A skill that eats corpses means the body near the click, not the ground it
+  // is lying on, so the aim snaps to it before the cast reads the point.
+  const sk0 = SKILL_BY_ID[id];
+  if (sk0 && sk0.targetsCorpse) {
+    const body = nearestCorpse(level, tx, ty, 1.6);
+    if (body) { tx = body.x; ty = body.y; }
+  }
   const r = castSkill(player, id, tx, ty, gctx);
   if (r === 'mana') { ui.say('Not enough mana'); audio.sfx('error'); return r; }
   if (r !== 'ok') return r;
@@ -541,7 +556,8 @@ function entityUnderCursor() {
   const w = cam.toWorld(Input.mouse.x, Input.mouse.y);
   let best = null, bd = 1.15;
   for (const e of level.entities) {
-    if (!e.alive || e.isPlayer) continue;
+    // A summoned turret is scenery: nothing hovers it, nothing clicks it.
+    if (!e.alive || e.isPlayer || e.isPet) continue;
     const d = Math.hypot(e.x - w.x, e.y - w.y);
     if (d < bd) { bd = d; best = e; }
   }
@@ -745,6 +761,9 @@ function step(dt) {
     updateAI(e, dt, gctx);
     if (!e.alive && e.corpseTimer > 45) e.remove = true;
   }
+  tickBuffs(gctx, dt);
+  tickHazards(gctx, dt);
+  tickPets(gctx, dt);
   level.removeDead();
   projectiles.update(dt, gctx);
 
@@ -997,6 +1016,13 @@ window.__audio = audio;
 window.__save = () => save(game);
 window.__clearSave = clearSave;
 window.__enter = (id) => { enterArea(id, null, true); return areaId; };
+// The mechanics the new skills are built from. Nothing casts them until the
+// skill definitions land, and the formula-check harness exercises them one at a
+// time, so this is how they are reached from outside.
+window.__mech = {
+  addHazard, tickHazards, addPet, tickPets, beam, tickBuffs, addStack, stackCount,
+  nearestCorpse, consumeCorpse, taunt, SKILL_BY_ID,
+};
 window.__killBoss = () => {
   const b = level.entities.find((e) => e.rank === 'boss' && e.alive);
   if (!b) return null;

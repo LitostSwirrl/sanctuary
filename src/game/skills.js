@@ -11,6 +11,7 @@
 //     damageMonster(monster, dmgObject, opts) }
 
 import { rollHit, rollDamage, monsterDefense } from './combat.js';
+import { FX } from '../art/fx.js';
 
 const TAU = Math.PI * 2;
 
@@ -20,12 +21,20 @@ export function allocatedPoints(player, id) {
   return player.skills[id] || 0;
 }
 
-// Effective level: allocated points plus anything the gear grants.
+// Levels granted by a buff for as long as it lasts — Battle Command's +1 to
+// everything. Gear and buffs add the same way; neither feeds a synergy.
+function buffSkills(player) {
+  let n = 0;
+  for (const id in player.buffs) n += player.buffs[id].plusSkills || 0;
+  return n;
+}
+
+// Effective level: allocated points plus anything the gear or a buff grants.
 export function skillLevel(player, id) {
   const base = allocatedPoints(player, id);
   if (base <= 0) return 0;
   const sk = SKILL_BY_ID[id];
-  return base + player.skillBonus(sk ? sk.tree : null);
+  return base + player.skillBonus(sk ? sk.tree : null) + buffSkills(player);
 }
 
 function synergyPct(player, skill) {
@@ -96,7 +105,9 @@ function aimVector(caster, tx, ty, speed) {
 
 // One weapon blow with a skill's bonuses folded in. Mastery ED/AR are already
 // inside minDamage/maxDamage/attackRating via recalc; skill ED stacks on top.
-function weaponHit(caster, m, ctx, { ed = 0, ar = 0, mul = 1 } = {}) {
+// Exported because a thrown weapon lands the same blow at range, and that is
+// resolved inside the projectile system.
+export function weaponHit(caster, m, ctx, { ed = 0, ar = 0, mul = 1 } = {}) {
   if (!rollHit(ctx.rng, caster.attackRating + ar, monsterDefense(m), caster.level, m.mlvl)) {
     ctx.fx.float(m.x, m.y, 'miss', 'rgba(190,190,190,1)');
     return 0;
@@ -154,6 +165,221 @@ function meleeStrike(caster, tx, ty, ctx, onHit) {
     onHitFrame: () => { if (target.alive && caster.distTo(target) <= MELEE_REACH + 0.2) onHit(target); },
     onEnd: () => caster.setAnim('idle'),
   });
+  return true;
+}
+
+// ------------------------------------------------------------ ground hazards
+
+// A patch of ground that keeps working after the cast: Fire Wall, Blaze,
+// Blizzard, and Grim Ward's totem. `until` is a clock time — `ctx.time + n`
+// seconds — and `tick` is how often it bites, so nothing standing in one takes
+// damage more often than that. A `fear` hazard pulses the Howl flee-state
+// instead of damage; `fear: true` routs for 1.5s a pulse, a number says how long.
+export function addHazard(level, o) {
+  if (!level.hazards) level.hazards = [];
+  const h = {
+    x: o.x, y: o.y, r: o.r ?? 2,
+    element: o.element || 'fire',
+    dps: o.dps || 0,
+    until: o.until || 0,
+    tick: o.tick ?? 0.4,
+    fear: o.fear || false,
+    source: o.source || null,
+    pierce: o.pierce || null,
+    t: 0, fxT: 0,
+  };
+  level.hazards.push(h);
+  return h;
+}
+
+export function tickHazards(ctx, dt) {
+  const list = ctx.level.hazards;
+  if (!list || !list.length) return;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const h = list[i];
+    if (ctx.time >= h.until) { list.splice(i, 1); continue; }
+
+    h.fxT += dt;
+    if (h.fxT >= 0.07) { h.fxT = 0; FX.hazard(ctx.fx, h.x, h.y, h.r, h.element); }
+
+    h.t += dt;
+    if (h.t < h.tick) continue;
+    h.t = 0;
+    for (const e of ctx.level.entities) {
+      if (!e.alive || e.isPlayer || e.isNpc) continue;
+      if (Math.hypot(e.x - h.x, e.y - h.y) > h.r + e.radius) continue;
+      if (h.fear) {
+        // Bosses shrug off a fear pulse exactly as they shrug off Howl.
+        if (e.def.boss || e.taunt) continue;
+        e.state = 'flee';
+        e.fleeTimer = Math.max(e.fleeTimer || 0, h.fear === true ? 1.5 : h.fear);
+      } else {
+        ctx.damageMonster(e, { [h.element]: h.dps * h.tick }, { source: h.source, pierce: h.pierce });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------- pets
+
+// A turret with a lifetime: the Hydra. It stands in `level.entities` so the
+// renderer can draw it from a `sheet` if one is handed over, but it carries
+// `isNpc` — every hostile loop in the game already steps over that — so nothing
+// targets it, nothing separates from it, and it blocks nothing. Documented
+// simplification: monsters ignore it entirely.
+export function addPet(level, o) {
+  const pet = {
+    isNpc: true, isPet: true,
+    kind: o.kind || 'hydra',
+    x: o.x, y: o.y, dir: 2, radius: 0.3,
+    alive: true, remove: false,
+    sheet: o.sheet || null, animName: 'idle', frame: 0, hitFlash: 0,
+    until: o.until || 0,
+    rate: o.rate ?? 1.2,
+    roll: o.roll || (() => 0),
+    element: o.element || 'fire',
+    owner: o.owner || null,
+    pierce: o.pierce || null,
+    cool: 0, fxT: 0,
+  };
+  level.addEntity(pet);
+  return pet;
+}
+
+// The nearest thing worth shooting: awake, alive, and not too far to bother.
+function nearestWaked(ctx, x, y, range) {
+  let best = null, bd = range;
+  for (const e of ctx.level.entities) {
+    if (!e.alive || e.isPlayer || e.isNpc || e.state === 'idle') continue;
+    const d = Math.hypot(e.x - x, e.y - y);
+    if (d < bd) { bd = d; best = e; }
+  }
+  return best;
+}
+
+export function tickPets(ctx, dt) {
+  for (const p of ctx.level.entities) {
+    if (!p.isPet || p.remove) continue;
+    if (ctx.time >= p.until) {
+      p.alive = false; p.remove = true;
+      ctx.fx.burst('smoke', p.x, p.y, 10, { z: 8, spread: 1.6, r: 80, g: 70, b: 62, life: 0.8 });
+      continue;
+    }
+    p.fxT += dt;
+    if (p.fxT >= 0.06) { p.fxT = 0; FX.totem(ctx.fx, p.x, p.y, p.element); }
+
+    p.cool -= dt;
+    if (p.cool > 0) continue;
+    const t = nearestWaked(ctx, p.x, p.y, 11);
+    if (!t) continue;
+    p.cool = p.rate;
+    const a = aimVector(p, t.x, t.y, 14);
+    ctx.projectiles.spawn({
+      x: p.x, y: p.y, z: 14, vx: a.vx, vy: a.vy, speed: 14,
+      element: p.element, colour: '#ff8a30', drawR: 4.5, light: 4.5, ttl: 1.6,
+      trail: (q) => { if (ctx.rng.chance(0.5)) ctx.fx.spawn('ember', q.x, q.y, { z: q.z, spread: 0.3, spreadZ: 3, r: 255, g: 140, b: 50, size: 2, life: 0.28 }); },
+      onHit: (q, e) => ctx.damageMonster(e, { [p.element]: p.roll() }, { source: p.owner, pierce: p.pierce }),
+      onExpire: (q) => ctx.fx.burst('ember', q.x, q.y, 6, { z: q.z, spread: 1.2, r: 255, g: 150, b: 60, life: 0.3 }),
+    });
+    if (ctx.sfx) ctx.sfx('cast');
+  }
+}
+
+// ---------------------------------------------------------------------- beam
+
+// An instant line of damage with a bolt drawn down it: Lightning. Everything
+// within `width` of the line is hit once, and the line stops at the first wall
+// so nothing is struck through rock.
+export function beam(ctx, caster, tx, ty, o = {}) {
+  const range = o.range ?? 12;
+  const width = o.width ?? 0.6;
+  const element = o.element || 'light';
+  const roll = o.roll || (() => 0);
+  const a = aimVector(caster, tx, ty, 1);
+  let len = 0;
+  while (len < range) {
+    if (ctx.level.blocked(caster.x + a.dx * (len + 0.25), caster.y + a.dy * (len + 0.25))) break;
+    len += 0.25;
+  }
+  let hits = 0;
+  for (const e of ctx.level.entities) {
+    if (!e.alive || e.isPlayer || e.isNpc) continue;
+    const px = e.x - caster.x, py = e.y - caster.y;
+    const along = px * a.dx + py * a.dy;
+    if (along < 0 || along > len) continue;
+    if (Math.abs(px * a.dy - py * a.dx) > width + e.radius) continue;
+    ctx.damageMonster(e, { [element]: roll() }, { source: caster, pierce: o.pierce || pierceTable(caster) });
+    hits++;
+  }
+  FX.beam(ctx.fx, caster.x, caster.y, caster.x + a.dx * len, caster.y + a.dy * len, element);
+  return hits;
+}
+
+// --------------------------------------------------------------------- buffs
+
+// What a buff does while it lasts and on its own: Thunder Storm's periodic
+// strike, and Frenzy's stacks, which run out one at a time rather than all at
+// once. Player.update owns a buff's lifetime; this owns its behaviour.
+export function tickBuffs(ctx, dt) {
+  const player = ctx.player;
+  let stacksChanged = false;
+  for (const id in player.buffs) {
+    const b = player.buffs[id];
+    if (b.proc) {
+      b.procT = (b.procT || 0) + dt;
+      // The remainder carries, so a long buff does not drift a frame slower
+      // with every strike it makes.
+      if (b.procT >= b.proc.every) { b.procT -= b.proc.every; b.proc.fn(ctx, player, b); }
+    }
+    if (b.stackAt) {
+      for (let i = b.stackAt.length - 1; i >= 0; i--) {
+        if ((b.stackAt[i] -= dt) > 0) continue;
+        b.stackAt.splice(i, 1);
+        stacksChanged = true;
+      }
+    }
+  }
+  if (stacksChanged) player.recalc();
+}
+
+// One more stack on a stacking buff, each carrying its own decay clock. At the
+// cap the oldest is dropped, so hitting again refreshes rather than wastes.
+// `refreshPassives` stays out of it: a stack is not an allocated point.
+export function addStack(player, id) {
+  const b = player.buffs[id];
+  if (!b || !b.stacks) return 0;
+  if (!b.stackAt) b.stackAt = [];
+  if (b.stackAt.length >= b.stacks.max) b.stackAt.shift();
+  b.stackAt.push(b.stacks.decay);
+  player.recalc();
+  return b.stackAt.length;
+}
+
+export function stackCount(player, id) {
+  const b = player.buffs[id];
+  return b && b.stackAt ? b.stackAt.length : 0;
+}
+
+// ------------------------------------------------------------------- corpses
+
+// Corpses are simply the dead still lying in `level.entities` — the same bodies
+// a Shaman raises. A consumed one is spent: nothing raises it and nothing loots
+// it twice.
+export function nearestCorpse(level, x, y, range = 2) {
+  let best = null, bd = range;
+  for (const e of level.entities) {
+    if (e.alive || e.isPlayer || e.isNpc || e.consumed || e.remove || !e.defId) continue;
+    const d = Math.hypot(e.x - x, e.y - y);
+    if (d < bd) { bd = d; best = e; }
+  }
+  return best;
+}
+
+export function consumeCorpse(ctx, c) {
+  if (!c || c.consumed) return false;
+  c.consumed = true;
+  c.remove = true;
+  ctx.fx.burst('dust', c.x, c.y, 14, { z: 6, spread: 2, r: 120, g: 105, b: 80, life: 0.6 });
   return true;
 }
 

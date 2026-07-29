@@ -66,7 +66,7 @@ function separate(m, ctx) {
   const list = ctx.level.entities;
   for (let i = 0; i < list.length; i++) {
     const o = list[i];
-    if (o === m || !o.alive || o.isPlayer) continue;
+    if (o === m || !o.alive || o.isPlayer || o.isPet) continue;
     const dx = o.x - m.x, dy = o.y - m.y;
     if (Math.abs(dx) > 1.2 || Math.abs(dy) > 1.2) continue;
     m.separate(o, ctx.dt);
@@ -122,7 +122,9 @@ function shamanResurrect(m, ctx) {
   // pack worth killing in the right order.
   const list = ctx.level.entities;
   for (const c of list) {
-    if (c.alive || c.resurrected || c.rank === 'unique' || c.rank === 'boss') continue;
+    // A corpse the Barbarian has searched is spent: there is nothing left to
+    // raise, which is half the point of Find Item.
+    if (c.alive || c.resurrected || c.consumed || c.rank === 'unique' || c.rank === 'boss') continue;
     if (!c.defId || (c.defId !== 'fallen' && c.defId !== 'devilkin')) continue;
     if (Math.hypot(c.x - m.x, c.y - m.y) > 7) continue;
     ctx.resurrect(m, c);
@@ -166,6 +168,20 @@ function andarielTurn(m, ctx) {
   return false;
 }
 
+// Taunt: the target must come and swing, whatever it would rather be doing.
+// It overrides flee and a ranged monster's habit of keeping its distance, and
+// the blow it finally lands is clumsier and lighter — `arDebuff` and
+// `dmgDebuff` are the fractions taken off, read where melee is resolved.
+export function taunt(monster, player, o = {}) {
+  if (!monster || !monster.alive || monster.def.boss) return false;
+  monster.taunt = { t: o.seconds ?? 6, arDebuff: o.arDebuff || 0, dmgDebuff: o.dmgDebuff || 0 };
+  monster.state = 'chase';
+  monster.fleeTimer = undefined;
+  monster.path = null;
+  monster.face(player.x, player.y);
+  return true;
+}
+
 // -------------------------------------------------------------------- update
 
 export function updateAI(m, dt, ctx) {
@@ -180,6 +196,12 @@ export function updateAI(m, dt, ctx) {
   if (m.frozen > 0) { m.updateAnim(dt); return; }
   if (m.stunned > 0) { m.stunned -= dt; m.setAnim('idle'); m.updateAnim(dt); return; }
   if (m.battlecry && (m.battlecry.t -= dt) <= 0) m.battlecry = null;
+  if (m.taunt) {
+    if ((m.taunt.t -= dt) <= 0) m.taunt = null;
+    // Whatever sent it running — Howl, a dead leader, a Grim Ward — the taunt
+    // outranks it until it lapses.
+    else if (m.state === 'flee') { m.state = 'chase'; m.fleeTimer = undefined; }
+  }
 
   m.cool -= dt;
   m.specialCool -= dt;
@@ -201,7 +223,7 @@ export function updateAI(m, dt, ctx) {
   }
 
   // A pack whose unique leader has fallen loses its nerve.
-  if (m.def.flees && m.leader && !m.leader.alive && m.state !== 'flee' && m.fleeTimer === undefined) {
+  if (m.def.flees && m.leader && !m.leader.alive && !m.taunt && m.state !== 'flee' && m.fleeTimer === undefined) {
     m.fleeTimer = 4.5;
     m.state = 'flee';
   }
@@ -240,7 +262,8 @@ export function updateAI(m, dt, ctx) {
         if (shamanResurrect(m, ctx)) { startCast(m, ctx, () => {}); break; }
       }
 
-      const keep = m.def.keepDistance || 0;
+      // A taunted archer stops being shy and comes into reach.
+      const keep = m.taunt ? 0 : (m.def.keepDistance || 0);
       const inRange = dist <= m.attackRange;
       const hasShot = keep > 0 && dist <= m.attackRange && hasLineOfSight(ctx.level, m.x, m.y, player.x, player.y);
 

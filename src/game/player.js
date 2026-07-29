@@ -87,7 +87,13 @@ export class Player extends Entity {
 
     this.quests = {};
     this.waypoints = { town: true };
-    this.buffs = {};                                   // id -> { t, mag }, ticked in update
+    // id -> { t, mag }, ticked in update. A buff may also carry, and the engine
+    // will honour: `plusSkills` (levels added to every skill while it lasts),
+    // `esplit` (the share of a blow paid from mana before life), `onStruckChill`
+    // and `onStruckDamage` (what a melee blow on you gets back), `proc:
+    // { every, fn }` (something it does on its own timer), and `stacks:
+    // { max, decay }` with `ias`, which is Frenzy: swing speed per live stack.
+    this.buffs = {};
     this.masteryPoints = { axe: 0, mace: 0, sword: 0 }; // written by refreshPassives
     this.ironSkinLevel = 0;
     this.recalc(true);
@@ -138,7 +144,15 @@ export class Player extends Entity {
     const mBonus = mp > 0 ? 28 + 8 * (mp - 1) : 0;
     this.minDamage = Math.floor(((wpn ? wpn.minDmg : 1) + t.minDmg) * (1 + mBonus / 100));
     this.maxDamage = Math.floor(((wpn ? wpn.maxDmg : 2) + t.maxDmg) * (1 + mBonus / 100));
-    this.attackSpeed = 1 + t.ias / 100;
+    // A buff can hurry the swing, and a stacking one does it once per live
+    // stack — which is the whole of Frenzy.
+    let ias = t.ias;
+    for (const id in this.buffs) {
+      const b = this.buffs[id];
+      if (!b.ias) continue;
+      ias += b.ias * (b.stacks ? (b.stackAt ? b.stackAt.length : 0) : 1);
+    }
+    this.attackSpeed = 1 + ias / 100;
     this.attackRating = Math.floor(attackRatingFrom(dex, t.ar, this.level) + mBonus);
 
     // Raising vitality grants the new life immediately rather than only the

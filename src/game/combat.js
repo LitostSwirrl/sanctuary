@@ -100,6 +100,37 @@ export function xpPenalty(plevel, mlevel) {
 
 export const ELEMENTS = ['fire', 'cold', 'light', 'pois'];
 
+// Energy Shield: a buff carrying `esplit` diverts that share of every blow to
+// mana, and only as far as the mana actually stretches. The rest lands on life
+// as usual, so an empty mana orb means no protection at all.
+function payFromMana(target, total) {
+  if (total <= 0 || !target.mana) return 0;
+  let split = 0;
+  for (const id in target.buffs) split = Math.max(split, target.buffs[id].esplit || 0);
+  if (split <= 0) return 0;
+  const paid = Math.min(target.mana, total * split);
+  target.mana -= paid;
+  return paid;
+}
+
+// The cold armours answer a melee blow: the striker is chilled, takes damage,
+// or both. A buff carries `onStruckChill: { seconds, amount }` and
+// `onStruckDamage: { element, min, max }`. The retaliation is routed through
+// the caller's damageMonster so a kill still pays experience and loot.
+export function onStruck(defender, striker, ctx) {
+  if (!striker || !striker.alive || defender.alive === false) return 0;
+  let dealt = 0;
+  for (const id in defender.buffs) {
+    const b = defender.buffs[id];
+    if (b.onStruckChill) applyChill(striker, b.onStruckChill.seconds, b.onStruckChill.amount ?? 0.35);
+    if (!b.onStruckDamage) continue;
+    const d = b.onStruckDamage;
+    const roll = d.min + ctx.rng.f() * (d.max - d.min);
+    dealt += ctx.damageMonster(striker, { [d.element || 'cold']: roll }, { source: defender, pierce: d.pierce || null });
+  }
+  return dealt;
+}
+
 // dmg is { phys, fire, cold, light, pois }; every field optional.
 // opts.pierce lowers the target's resistance before it is applied, which is how
 // the masteries work.
@@ -126,6 +157,7 @@ export function applyDamage(target, dmg, opts = {}) {
 
   if (opts.absolute) total = opts.absolute;
   total = Math.max(0, total);
+  total -= payFromMana(target, total);
 
   target.hp -= total;
   target.hitFlash = 0.34;
