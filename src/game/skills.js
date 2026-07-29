@@ -11,6 +11,10 @@
 //     damageMonster(monster, dmgObject, opts) }
 
 import { rollHit, rollDamage, monsterDefense, applyFreeze } from './combat.js';
+import { taunt as forceTaunt } from './ai.js';
+import { groundItem } from './loot.js';
+import { rollItem, makePotion } from '../items/item.js';
+import { POTIONS, tierForAreaLevel } from '../items/bases.js';
 import { FX } from '../art/fx.js';
 
 const TAU = Math.PI * 2;
@@ -474,6 +478,25 @@ export function consumeCorpse(ctx, c) {
   return true;
 }
 
+// The body near the click, close enough to the caster to be searched — Find
+// Potion, Find Item and the Grim Ward all want the same thing, and all three
+// veto (mana refunded) when there is nothing to work with.
+function corpseToWork(ctx, caster, tx, ty) {
+  const c = nearestCorpse(ctx.level, tx, ty, CORPSE_REACH);
+  if (!c || caster.distTo(c) > CORPSE_RANGE) return null;
+  return c;
+}
+
+// What the body was carrying, laid on the ground beside it rather than pushed
+// into the bag: a full inventory should not swallow a find in silence.
+function dropBeside(ctx, c, item) {
+  if (!item) return null;
+  const p = ctx.level.nearestOpen(c.x + ctx.rng.range(-0.7, 0.7), c.y + ctx.rng.range(-0.7, 0.7), 3);
+  const gi = groundItem(item, p.x, p.y);
+  ctx.level.items.push(gi);
+  return gi;
+}
+
 // ------------------------------------------------------------------- skills
 
 // Shapes the tooltips print and the casts use. A promise and the behaviour
@@ -493,6 +516,16 @@ const STORM_EVERY = 2, STORM_RANGE = 9;
 // Every duration in this file is a multiple of it, which is what makes a full
 // lifetime deliver the printed rate exactly rather than to the nearest bite.
 const HAZARD_TICK = 0.2;
+// The Barbarian's reaches. A leap and a leap attack land in the same circle;
+// a body must be within CORPSE_REACH of the click and CORPSE_RANGE of the man
+// doing the searching; the ward pulses on its own slow clock because fear is
+// re-applied rather than accumulated, and one pulse a second is enough to keep
+// a pack running without laying a particle field on the frame budget.
+const LEAP_AOE_R = 1.5;
+const FRENZY_STACKS = 5;
+const TAUNT_REACH = 8;
+const CORPSE_REACH = 1.8, CORPSE_RANGE = 6;
+const WARD_PULSE = 1;
 
 export const SKILLS = [
   // ------------------------------------------------------------------- FIRE
@@ -1184,20 +1217,6 @@ export const SKILLS = [
     },
   },
   {
-    id: 'concentrate', name: 'Concentrate', tree: 'combat', req: 18, prereq: ['bash'], melee: true, iconSeed: 3,
-    mana: () => 2,
-    synergies: [{ id: 'bash', pct: 5 }],
-    blurb: 'A deliberate, heavy blow. Bash practice makes it heavier.',
-    effect: (l) => `+${60 + 10 * (l - 1)}% Damage, +${30 + 5 * (l - 1)} Attack Rating`,
-    cast(caster, lvl, tx, ty, ctx) {
-      // Synergy reads hard points, matching every other synergy in the file.
-      const ed = 60 + 10 * (lvl - 1) + 5 * allocatedPoints(caster, 'bash');
-      return meleeStrike(caster, tx, ty, ctx, (target) => {
-        weaponHit(caster, target, ctx, { ed, ar: 30 + 5 * (lvl - 1) });
-      });
-    },
-  },
-  {
     id: 'leap', name: 'Leap', tree: 'combat', req: 6, prereq: [], melee: true, iconSeed: 2,
     mana: () => 3,
     blurb: 'Jump to a point. The landing throws everything nearby off its feet.',
@@ -1231,7 +1250,7 @@ export const SKILLS = [
         const stun = 0.4 + 0.05 * (lvl - 1);
         for (const e of ctx.level.entities) {
           if (!e.alive || e.isPlayer || e.isNpc) continue;
-          if (Math.hypot(e.x - caster.x, e.y - caster.y) > 1.5 + e.radius) continue;
+          if (Math.hypot(e.x - caster.x, e.y - caster.y) > LEAP_AOE_R + e.radius) continue;
           knockback(ctx.level, e, caster.x, caster.y, 1.0);
           applyStun(e, stun);
         }
@@ -1244,7 +1263,160 @@ export const SKILLS = [
     },
   },
   {
-    id: 'whirlwind', name: 'Whirlwind', tree: 'combat', req: 24, prereq: ['concentrate'], melee: true, iconSeed: 4,
+    id: 'stun', name: 'Stun', tree: 'combat', req: 12, prereq: ['bash'], melee: true, iconSeed: 3,
+    mana: () => 2,
+    stun: (l) => 1.2 + 0.1 * (l - 1),
+    blurb: 'A blow to the head rather than the body. Bosses keep their feet.',
+    effect(l) {
+      return `+${20 + 6 * (l - 1)}% Damage, +${25 + 6 * (l - 1)} Attack Rating, stuns ${this.stun(l).toFixed(1)}s`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      return meleeStrike(caster, tx, ty, ctx, (target) => {
+        const dealt = weaponHit(caster, target, ctx, { ed: 20 + 6 * (lvl - 1), ar: 25 + 6 * (lvl - 1) });
+        // A miss rattles nobody, which is what the attack rating on it is for.
+        if (dealt > 0) applyStun(target, sk.stun(lvl));
+      });
+    },
+  },
+  {
+    id: 'doublethrow', name: 'Double Throw', tree: 'combat', req: 12, prereq: ['doubleswing'], melee: true, iconSeed: 4,
+    mana: () => 3,
+    // 30 rather than 20 at rank 1: measured at the bench, 20 put the two throws
+    // at 0.74x of Double Swing's damage per mana, just under the band.
+    ed: (l) => 30 + 8 * (l - 1),
+    ar: (l) => 20 + 6 * (l - 1),
+    blurb: 'Both hands at once, and neither of them keeps what it was holding.',
+    effect(l) {
+      return `Throws two, each for weapon damage +${this.ed(l)}% and +${this.ar(l)} Attack Rating`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      // Throwing Mastery rides only this skill, which is why it is read here
+      // rather than folded into the sheet by refreshPassives.
+      const tm = skillLevel(caster, 'throwingmastery');
+      const bonus = tm > 0 ? 25 + 8 * (tm - 1) : 0;
+      const ed = sk.ed(lvl) + bonus, ar = sk.ar(lvl) + bonus;
+      const base = Math.atan2(ty - caster.y, tx - caster.x);
+      // Weapon speed, not the cast lockout: this is a swing that lets go.
+      caster.stop();
+      caster.busy = 0.42 / caster.attackSpeed;
+      caster.face(tx, ty);
+      if (ctx.sfx) ctx.sfx('swing');
+      caster.setAnim('attack', {
+        loop: false, force: true, hitFrame: 3,
+        onHitFrame: () => {
+          for (const off of [-0.09, 0.09]) {
+            const ang = base + off;
+            ctx.projectiles.spawn({
+              x: caster.x, y: caster.y, z: 16,
+              vx: Math.cos(ang) * 13, vy: Math.sin(ang) * 13, speed: 13,
+              element: 'phys', thrown: true, weapon: true, owner: caster,
+              ed, ar, ttl: 1.1, radius: 0.3,
+            });
+          }
+        },
+        onEnd: () => caster.setAnim('idle'),
+      });
+      return true;
+    },
+  },
+  {
+    id: 'leapattack', name: 'Leap Attack', tree: 'combat', req: 18, prereq: ['leap'], melee: true, iconSeed: 5,
+    mana: () => 4,
+    ed: (l) => 150 + 15 * (l - 1),
+    blurb: 'Land on them. The ground takes some of it and they take the rest.',
+    effect(l) {
+      return `Range ${(5 + 0.25 * (l - 1)).toFixed(2)} tiles, then everything within ${LEAP_AOE_R} tiles takes weapon damage +${this.ed(l)}%`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      const range = 5 + 0.25 * (lvl - 1);
+      const d = Math.hypot(tx - caster.x, ty - caster.y);
+      let gx = tx, gy = ty;
+      if (d > range) { gx = caster.x + (tx - caster.x) / d * range; gy = caster.y + (ty - caster.y) / d * range; }
+      const spot = ctx.level.nearestOpen(gx, gy, 4);
+      if (ctx.level.blockedCircle(spot.x, spot.y, caster.radius)) return false;
+      const from = { x: caster.x, y: caster.y };
+      const dur = 0.45;
+      const ed = sk.ed(lvl);
+      let t = 0;
+      caster.stop();
+      caster.busy = dur + 0.1;
+      caster.face(spot.x, spot.y);
+      caster.setAnim('attack', { fps: 12, loop: true });
+      if (ctx.sfx) ctx.sfx('swing');
+      caster.action = (dt) => {
+        t += dt;
+        const k = Math.min(1, t / dur);
+        caster.x = from.x + (spot.x - from.x) * k;
+        caster.y = from.y + (spot.y - from.y) * k;
+        caster.zOff = Math.sin(k * Math.PI) * 26;
+        if (k < 1) return false;
+        caster.zOff = 0;
+        caster.setAnim('idle', { force: true });
+        // The blow is the landing: everything under it is struck once, with
+        // the attack roll each, exactly as if it had been swung at.
+        for (const e of ctx.level.entities) {
+          if (!e.alive || e.isPlayer || e.isNpc) continue;
+          if (Math.hypot(e.x - caster.x, e.y - caster.y) > LEAP_AOE_R + e.radius) continue;
+          weaponHit(caster, e, ctx, { ed });
+        }
+        ctx.fx.ring(caster.x, caster.y, { maxR: 1.8, cr: 220, cg: 170, cb: 110, life: 0.32, w: 4, lit: 1.4 });
+        ctx.fx.burst('dust', caster.x, caster.y, 18, { z: 4, spread: 2.6, r: 150, g: 130, b: 100, life: 0.55 });
+        if (ctx.sfx) ctx.sfx('hit');
+        return true;
+      };
+      return true;
+    },
+  },
+  {
+    id: 'concentrate', name: 'Concentrate', tree: 'combat', req: 18, prereq: ['stun'], melee: true, iconSeed: 6,
+    mana: () => 2,
+    synergies: [{ id: 'bash', pct: 5 }],
+    blurb: 'A deliberate, heavy blow. Bash practice makes it heavier.',
+    effect: (l) => `+${60 + 10 * (l - 1)}% Damage, +${30 + 5 * (l - 1)} Attack Rating`,
+    cast(caster, lvl, tx, ty, ctx) {
+      // Synergy reads hard points, matching every other synergy in the file.
+      const ed = 60 + 10 * (lvl - 1) + 5 * allocatedPoints(caster, 'bash');
+      return meleeStrike(caster, tx, ty, ctx, (target) => {
+        weaponHit(caster, target, ctx, { ed, ar: 30 + 5 * (lvl - 1) });
+      });
+    },
+  },
+  {
+    id: 'frenzy', name: 'Frenzy', tree: 'combat', req: 24, prereq: ['doublethrow'], melee: true, iconSeed: 7,
+    mana: () => 2,
+    ed: (l) => 30 + 8 * (l - 1),
+    ias: (l) => 6 + (l - 1),
+    decay: (l) => 3 + 0.2 * (l - 1),
+    duration: (l) => 12 + 0.4 * (l - 1),
+    blurb: 'Blood in the water. Every blow that lands makes the next one sooner.',
+    effect(l) {
+      return `+${this.ed(l)}% Damage; each hit adds +${this.ias(l)}% Attack Speed for ${this.decay(l).toFixed(1)}s, up to ${FRENZY_STACKS}`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      return meleeStrike(caster, tx, ty, ctx, (target) => {
+        const dealt = weaponHit(caster, target, ctx, { ed: sk.ed(lvl), ar: 20 + 6 * (lvl - 1) });
+        if (dealt <= 0) return;             // a miss earns nothing
+        const b = caster.buffs.frenzy;
+        // The window refreshes on every landed blow; the stacks inside it keep
+        // their own clocks and run out one at a time.
+        if (b) b.t = sk.duration(lvl);
+        else {
+          caster.buffs.frenzy = {
+            t: sk.duration(lvl), ias: sk.ias(lvl),
+            stacks: { max: FRENZY_STACKS, decay: sk.decay(lvl) },
+          };
+        }
+        addStack(caster, 'frenzy');
+        ctx.fx.burst('spark', caster.x, caster.y, 5, { z: 16, spread: 0.9, r: 255, g: 120, b: 70, life: 0.24 });
+      });
+    },
+  },
+  {
+    id: 'whirlwind', name: 'Whirlwind', tree: 'combat', req: 30, prereq: ['concentrate', 'leapattack'], melee: true, iconSeed: 8,
     mana: () => 12,
     blurb: 'Become the storm. Travel, and everything on the way is hit.',
     effect: (l) => `${-50 + 10 * (l - 1)}% Damage per hit, a hit every 0.15s en route`,
@@ -1282,10 +1454,35 @@ export const SKILLS = [
       return true;
     },
   },
+  {
+    id: 'berserk', name: 'Berserk', tree: 'combat', req: 30, prereq: ['concentrate'], melee: true, iconSeed: 9,
+    mana: () => 5,
+    ed: (l) => 250 + 25 * (l - 1),
+    duration: (l) => 3 + 0.1 * (l - 1),
+    blurb: 'Everything into the swing, nothing left over for the guard.',
+    effect(l) {
+      return `+${this.ed(l)}% Damage, +${40 + 6 * (l - 1)} Attack Rating, and your Defence is 0 for ${this.duration(l).toFixed(1)}s`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      const swung = meleeStrike(caster, tx, ty, ctx, (target) => {
+        weaponHit(caster, target, ctx, { ed: sk.ed(lvl), ar: 40 + 6 * (lvl - 1) });
+      });
+      if (!swung) return false;                  // nothing in reach, nothing paid
+      // The guard is what buys the rage: a buff carrying defPct -100 multiplies
+      // the sheet's defence by zero, and nothing in recalc adds it back while
+      // the buff stands. It returns the moment the buff lapses.
+      caster.buffs.berserk = { t: sk.duration(lvl), defPct: -100 };
+      caster.recalc();
+      ctx.fx.ring(caster.x, caster.y, { maxR: 2, cr: 220, cg: 60, cb: 40, life: 0.34, w: 4, lit: 1.6 });
+      ctx.fx.burst('ember', caster.x, caster.y, 14, { z: 16, spread: 1.6, spreadZ: 20, r: 230, g: 80, b: 50, life: 0.45 });
+      return true;
+    },
+  },
 
   // ------------------------------------------------------- BARBARIAN WARCRIES
   {
-    id: 'howl', name: 'Howl', tree: 'cries', req: 1, prereq: [], iconSeed: 0,
+    id: 'howl', name: 'Howl', tree: 'cries', req: 1, prereq: [], iconSeed: 10,
     mana: () => 4,
     blurb: 'A shout that sends lesser enemies running.',
     effect: (l) => `Monsters within 4 tiles flee for ${(3 + 0.4 * (l - 1)).toFixed(1)}s`,
@@ -1301,7 +1498,52 @@ export const SKILLS = [
     },
   },
   {
-    id: 'shout', name: 'Shout', tree: 'cries', req: 6, prereq: ['howl'], iconSeed: 1,
+    id: 'findpotion', name: 'Find Potion', tree: 'cries', req: 1, prereq: [], targetsCorpse: true, iconSeed: 11,
+    mana: () => 2,
+    finds: (l) => 1 + Math.floor((l - 1) / 10),
+    blurb: 'Everything carries something. Turn it out and see.',
+    effect(l) {
+      const n = this.finds(l);
+      return `Searches a body within ${CORPSE_RANGE} tiles for ${n} potion${n > 1 ? 's' : ''}; the body is spent`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const body = corpseToWork(ctx, caster, tx, ty);
+      if (!body) return false;                   // no body, no cost
+      consumeCorpse(ctx, body);
+      const tier = tierForAreaLevel(ctx.level.areaLevel || 1);
+      const pool = POTIONS.filter((p) => p.tier <= tier);
+      for (let i = 0; i < this.finds(lvl); i++) dropBeside(ctx, body, makePotion(ctx.rng.pick(pool).id));
+      ctx.fx.ring(body.x, body.y, { maxR: 1.2, cr: 220, cg: 90, cb: 80, life: 0.3, w: 3, lit: 1.2 });
+      if (ctx.sfx) ctx.sfx('pickup');
+      return true;
+    },
+  },
+  {
+    id: 'taunt', name: 'Taunt', tree: 'cries', req: 6, prereq: ['howl'], iconSeed: 12,
+    mana: () => 3,
+    duration: (l) => 6 + 0.3 * (l - 1),
+    arDebuff: (l) => Math.min(0.6, 0.25 + 0.02 * (l - 1)),
+    dmgDebuff: (l) => Math.min(0.5, 0.2 + 0.015 * (l - 1)),
+    blurb: 'An insult in a language it does not need to speak. Bosses are past caring.',
+    effect(l) {
+      return `Pulls one enemy within ${TAUNT_REACH} tiles onto you for ${this.duration(l).toFixed(1)}s, `
+        + `at -${Math.round(this.arDebuff(l) * 100)}% Attack Rating and -${Math.round(this.dmgDebuff(l) * 100)}% Damage`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const t = targetNear(ctx, tx, ty, 1.6);
+      if (!t || caster.distTo(t) > TAUNT_REACH) return false;
+      // A boss refuses the taunt, the same way it shrugs off fear and stun, and
+      // a refusal costs nothing.
+      if (!forceTaunt(t, caster, {
+        seconds: this.duration(lvl), arDebuff: this.arDebuff(lvl), dmgDebuff: this.dmgDebuff(lvl),
+      })) return false;
+      ctx.fx.arc(caster.x, caster.y, t.x, t.y, { z: 18, w: 2, r: 232, g: 160, b: 48 });
+      ctx.fx.ring(t.x, t.y, { maxR: 1.2, cr: 232, cg: 160, cb: 48, life: 0.3, w: 3, lit: 1.2 });
+      return true;
+    },
+  },
+  {
+    id: 'shout', name: 'Shout', tree: 'cries', req: 6, prereq: ['howl'], iconSeed: 13,
     mana: () => 6,
     blurb: 'A rallying cry that hardens the skin like armour.',
     effect: (l) => `+${100 + 10 * (l - 1)}% Defence for ${20 + 5 * (l - 1)}s`,
@@ -1312,7 +1554,29 @@ export const SKILLS = [
     },
   },
   {
-    id: 'battlecry', name: 'Battle Cry', tree: 'cries', req: 18, prereq: ['howl'], iconSeed: 2,
+    id: 'finditem', name: 'Find Item', tree: 'cries', req: 12, prereq: ['findpotion'], targetsCorpse: true, iconSeed: 14,
+    mana: () => 4,
+    finds: (l) => 1 + Math.floor((l - 1) / 10),
+    blurb: 'A second search, and a better eye for what is worth carrying.',
+    effect(l) {
+      const n = this.finds(l);
+      return `Searches a body within ${CORPSE_RANGE} tiles for ${n} item${n > 1 ? 's' : ''} of this area; the body is spent`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const body = corpseToWork(ctx, caster, tx, ty);
+      if (!body) return false;
+      consumeCorpse(ctx, body);
+      const alvl = ctx.level.areaLevel || 1;
+      for (let i = 0; i < this.finds(lvl); i++) {
+        dropBeside(ctx, body, rollItem(ctx.rng, alvl, { mf: caster.magicFind, tier: tierForAreaLevel(alvl) }));
+      }
+      ctx.fx.ring(body.x, body.y, { maxR: 1.4, cr: 240, cg: 200, cb: 120, life: 0.32, w: 3, lit: 1.4 });
+      if (ctx.sfx) ctx.sfx('pickup');
+      return true;
+    },
+  },
+  {
+    id: 'battlecry', name: 'Battle Cry', tree: 'cries', req: 18, prereq: ['taunt'], iconSeed: 15,
     mana: () => 5,
     blurb: 'A curse of a shout. What hears it fights worse.',
     effect: (l) => `Enemies within 3.5 tiles: -50% Defence, -25% Damage for ${12 + (l - 1)}s`,
@@ -1327,7 +1591,7 @@ export const SKILLS = [
     },
   },
   {
-    id: 'battleorders', name: 'Battle Orders', tree: 'cries', req: 24, prereq: ['shout'], iconSeed: 3,
+    id: 'battleorders', name: 'Battle Orders', tree: 'cries', req: 24, prereq: ['shout'], iconSeed: 16,
     mana: () => 7,
     blurb: 'The order to stand. Life and mana swell to meet it.',
     effect: (l) => `+${30 + 3 * (l - 1)}% Maximum Life and Mana for ${30 + 6 * (l - 1)}s`,
@@ -1344,7 +1608,37 @@ export const SKILLS = [
     },
   },
   {
-    id: 'warcry', name: 'War Cry', tree: 'cries', req: 24, prereq: ['battlecry'], iconSeed: 4,
+    id: 'grimward', name: 'Grim Ward', tree: 'cries', req: 24, prereq: ['taunt'], targetsCorpse: true, iconSeed: 17,
+    mana: () => 8,
+    duration: (l) => 8 + 0.4 * (l - 1),
+    radius: (l) => 4 + 0.1 * (l - 1),
+    fear: (l) => 1.5 + 0.05 * (l - 1),
+    blurb: 'A body up on a stake. Whatever walks in remembers somewhere else to be.',
+    effect(l) {
+      return `A body on a stake routs everything within ${this.radius(l).toFixed(1)} tiles for ${this.duration(l).toFixed(1)}s`
+        + ' — bosses excepted. Only one ward stands at a time';
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const body = corpseToWork(ctx, caster, tx, ty);
+      if (!body) return false;
+      consumeCorpse(ctx, body);
+      // One ward, as in the original: planting a second takes the first down.
+      // It is also what keeps the fear pulses — and their smoke — bounded.
+      const list = ctx.level.hazards;
+      if (list) for (let i = list.length - 1; i >= 0; i--) if (list[i].ward) list.splice(i, 1);
+      const h = layHazard(ctx.level, {
+        x: body.x, y: body.y, r: this.radius(lvl), element: 'phys',
+        fear: this.fear(lvl), until: ctx.time + this.duration(lvl), tick: WARD_PULSE, source: caster,
+      });
+      h.ward = true;
+      ctx.fx.ring(body.x, body.y, { maxR: this.radius(lvl), cr: 206, cg: 192, cb: 150, life: 0.5, w: 3, lit: 1.2 });
+      ctx.fx.burst('smoke', body.x, body.y, 12, { z: 8, spread: 1.8, r: 100, g: 92, b: 80, life: 1.1 });
+      if (ctx.sfx) ctx.sfx('explode');
+      return true;
+    },
+  },
+  {
+    id: 'warcry', name: 'War Cry', tree: 'cries', req: 30, prereq: ['battlecry'], iconSeed: 18,
     mana: () => 10, element: 'phys',
     damage: (l) => ({ min: 18 + 6 * (l - 1), max: 28 + 8 * (l - 1) }),
     synergies: [{ id: 'howl', pct: 6 }, { id: 'battlecry', pct: 6 }],
@@ -1365,6 +1659,25 @@ export const SKILLS = [
     },
   },
 
+  {
+    id: 'battlecommand', name: 'Battle Command', tree: 'cries', req: 30, prereq: ['battleorders'], iconSeed: 19,
+    mana: () => 12,
+    duration: (l) => 20 + 2 * (l - 1),
+    blurb: 'The order that makes every trick come a little easier.',
+    // Deliberately narrow: the +1 moves every live skill-level read — damage,
+    // duration, reach, mana cost — but the passives are folded into the sheet at
+    // allocation time, and this buff does not go back and re-fold them. The
+    // tooltip promises only what the buff actually delivers.
+    effect(l) {
+      return `+1 to the skills you cast for ${Math.round(this.duration(l))}s; the passives keep the level on your sheet`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      caster.buffs.battlecommand = { t: this.duration(lvl), plusSkills: 1 };
+      ctx.fx.ring(caster.x, caster.y, { maxR: 2.8, cr: 255, cg: 220, cb: 140, life: 0.42, w: 3, lit: 1.6 });
+      ctx.fx.burst('glow', caster.x, caster.y, 14, { z: 18, spread: 1.8, r: 255, g: 220, b: 140, life: 0.5 });
+    },
+  },
+
   // ------------------------------------------------------ BARBARIAN MASTERIES
   {
     id: 'axemastery', name: 'Axe Mastery', tree: 'mastery', req: 1, prereq: [], passive: true, iconSeed: 0,
@@ -1372,19 +1685,55 @@ export const SKILLS = [
     effect: (l) => `+${28 + 8 * (l - 1)}% Damage, +${28 + 8 * (l - 1)} Attack Rating with axes`,
   },
   {
-    id: 'macemastery', name: 'Mace Mastery', tree: 'mastery', req: 1, prereq: [], passive: true, iconSeed: 1,
+    id: 'macemastery', name: 'Mace Mastery', tree: 'mastery', req: 1, prereq: [], passive: true, iconSeed: 3,
     blurb: 'Clubs, maces and hammers hit harder and truer in your hands.',
     effect: (l) => `+${28 + 8 * (l - 1)}% Damage, +${28 + 8 * (l - 1)} Attack Rating with maces`,
   },
   {
-    id: 'swordmastery', name: 'Sword Mastery', tree: 'mastery', req: 6, prereq: [], passive: true, iconSeed: 2,
+    id: 'swordmastery', name: 'Sword Mastery', tree: 'mastery', req: 1, prereq: [], passive: true, iconSeed: 1,
     blurb: 'Blades of every length hit harder and truer in your hands.',
     effect: (l) => `+${28 + 8 * (l - 1)}% Damage, +${28 + 8 * (l - 1)} Attack Rating with swords`,
   },
   {
-    id: 'ironskin', name: 'Iron Skin', tree: 'mastery', req: 12, prereq: [], passive: true, iconSeed: 3,
+    id: 'polearmmastery', name: 'Polearm Mastery', tree: 'mastery', req: 6, prereq: [], passive: true, iconSeed: 17,
+    blurb: 'Voulge, halberd, war scythe: reach, used as though it were close work.',
+    effect: (l) => `+${28 + 8 * (l - 1)}% Damage, +${28 + 8 * (l - 1)} Attack Rating with polearms`,
+  },
+  {
+    id: 'throwingmastery', name: 'Throwing Mastery', tree: 'mastery', req: 6, prereq: [], passive: true, iconSeed: 4,
+    blurb: 'A weapon you let go of still has to land where you meant it to.',
+    effect: (l) => `+${25 + 8 * (l - 1)}% Damage, +${25 + 8 * (l - 1)} Attack Rating with Double Throw`,
+  },
+  {
+    id: 'spearmastery', name: 'Spear Mastery', tree: 'mastery', req: 12, prereq: [], passive: true, iconSeed: 20,
+    blurb: 'Spear, trident, pike: the point kept where the weight wants to go.',
+    effect: (l) => `+${28 + 8 * (l - 1)}% Damage, +${28 + 8 * (l - 1)} Attack Rating with spears`,
+  },
+  {
+    id: 'increasedstamina', name: 'Increased Stamina', tree: 'mastery', req: 12, prereq: [], passive: true, iconSeed: 6,
+    // The original trains a stamina bar. This slice has none, so the training
+    // shows where it can be felt — and the tooltip says so outright rather than
+    // quietly meaning something else.
+    lifePct: (l) => 5 + 3 * (l - 1),
+    blurb: 'Wind that does not run out. No stamina bar here, so it is carried as flesh.',
+    effect(l) { return `+${this.lifePct(l)}% Maximum Life`; },
+  },
+  {
+    id: 'ironskin', name: 'Iron Skin', tree: 'mastery', req: 18, prereq: [], passive: true, iconSeed: 13,
     blurb: 'Skin like worked metal.',
     effect: (l) => `+${30 + 10 * (l - 1)}% Defence`,
+  },
+  {
+    id: 'increasedspeed', name: 'Increased Speed', tree: 'mastery', req: 24, prereq: [], passive: true, iconSeed: 2,
+    runPct: (l) => 8 + 2 * (l - 1),
+    blurb: 'Ground covered without thinking about covering it.',
+    effect(l) { return `+${this.runPct(l)}% Run Speed`; },
+  },
+  {
+    id: 'naturalresistance', name: 'Natural Resistance', tree: 'mastery', req: 30, prereq: [], passive: true, iconSeed: 15,
+    resAll: (l) => 5 + 3 * (l - 1),
+    blurb: 'Northern weather, and worse than weather, worked into the hide.',
+    effect(l) { return `+${this.resAll(l)}% to All Resistances`; },
   },
 ];
 
@@ -1427,7 +1776,14 @@ export function allocate(player, id) {
 
 // Warmth feeds player.manaRegenBonus directly; the masteries feed
 // masteryPoints and ironSkinLevel the same way, which recalc folds into
-// the sheet.
+// the sheet. The three Barbarian passives that are not about a weapon hand
+// recalc the finished percentage rather than their level, so the number the
+// tooltip prints and the number the sheet uses come from the same line.
+function pctOf(player, id, field) {
+  const lvl = skillLevel(player, id);
+  return lvl > 0 ? SKILL_BY_ID[id][field](lvl) : 0;
+}
+
 export function refreshPassives(player) {
   const w = skillLevel(player, 'warmth');
   player.manaRegenBonus = w > 0 ? SKILL_BY_ID.warmth.manaRegen(w) : 0;
@@ -1435,8 +1791,13 @@ export function refreshPassives(player) {
     axe: skillLevel(player, 'axemastery'),
     mace: skillLevel(player, 'macemastery'),
     sword: skillLevel(player, 'swordmastery'),
+    polearm: skillLevel(player, 'polearmmastery'),
+    spear: skillLevel(player, 'spearmastery'),
   };
   player.ironSkinLevel = skillLevel(player, 'ironskin');
+  player.lifeBonusPct = pctOf(player, 'increasedstamina', 'lifePct');
+  player.runSpeedBonusPct = pctOf(player, 'increasedspeed', 'runPct');
+  player.resistBonus = pctOf(player, 'naturalresistance', 'resAll');
   player.recalc();
 }
 

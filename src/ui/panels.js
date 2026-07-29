@@ -12,7 +12,7 @@ import { iconFor, ICON_CELL } from '../art/icons.js';
 import { fits, addToInventory, removeFromInventory, sellValue, groundItem } from '../game/loot.js';
 import {
   SKILLS, SKILL_BY_ID, CLASS_TREES, TREE_NAME, allocate, canAllocate,
-  allocatedPoints, skillLevel, describeSkill, manaCost,
+  allocatedPoints, skillLevel, describeSkill, manaCost, stackCount,
 } from '../game/skills.js';
 import { EQUIP_SLOTS } from '../game/player.js';
 
@@ -294,6 +294,12 @@ export class UI {
     line('Poison Resist', `${player.resists.pois}%`, '#8fd88f');
     ty += 8 * s;
     if (player.cls === 'barbarian') line('Attack Speed', `${player.totals.ias}%`);
+    // Frenzy is the one thing on this sheet that changes while you read it, so
+    // it gets its own row: how many stacks are alive and what they add.
+    if (player.buffs.frenzy) {
+      const n = stackCount(player, 'frenzy');
+      line('Frenzy', `${n} of ${player.buffs.frenzy.stacks.max}  (+${n * player.buffs.frenzy.ias}% Attack Speed)`, '#ff8a5a');
+    }
     else line('Faster Cast Rate', `${player.castRate}%`);
     line('Faster Run/Walk', `${player.totals.frw}%`);
     line('Magic Find', `${player.magicFind}%`);

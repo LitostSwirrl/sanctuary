@@ -23,6 +23,19 @@ export const BASES = [
   { id: 'doubleaxe', name: 'Double Axe', slot: 'weapon', kind: 'axe', w: 2, h: 3, tier: 3, dmg: [5, 13], req: { str: 43, dex: 0 } },
   { id: 'largeaxe', name: 'Large Axe', slot: 'weapon', kind: 'axe', w: 2, h: 4, tier: 2, dmg: [6, 13], req: { str: 35, dex: 0 }, twoHand: true },
   { id: 'battleaxe', name: 'Battle Axe', slot: 'weapon', kind: 'axe', w: 2, h: 4, tier: 3, dmg: [12, 32], req: { str: 54, dex: 0 }, twoHand: true },
+  // Reach, on a haft too long for one hand. A polearm carries a weighted head
+  // at the end of it; a spear is the same length sharpened rather than
+  // weighted, which in the original buys a faster swing. This slice has no
+  // per-weapon speed, so that difference lands in the damage and the
+  // requirement instead: spears ask a little dexterity and hit a little
+  // lighter than the polearm of the same tier.
+  { id: 'voulge', name: 'Voulge', slot: 'weapon', kind: 'polearm', w: 2, h: 4, tier: 1, dmg: [5, 14], req: { str: 30, dex: 0 }, twoHand: true },
+  { id: 'halberd', name: 'Halberd', slot: 'weapon', kind: 'polearm', w: 2, h: 4, tier: 2, dmg: [10, 26], req: { str: 42, dex: 20 }, twoHand: true },
+  { id: 'warscythe', name: 'War Scythe', slot: 'weapon', kind: 'polearm', w: 2, h: 4, tier: 3, dmg: [14, 34], req: { str: 56, dex: 32 }, twoHand: true },
+  { id: 'spear', name: 'Spear', slot: 'weapon', kind: 'spear', w: 2, h: 4, tier: 1, dmg: [4, 12], req: { str: 24, dex: 12 }, twoHand: true },
+  { id: 'trident', name: 'Trident', slot: 'weapon', kind: 'spear', w: 2, h: 4, tier: 2, dmg: [8, 20], req: { str: 36, dex: 22 }, twoHand: true },
+  { id: 'pike', name: 'Pike', slot: 'weapon', kind: 'spear', w: 2, h: 4, tier: 3, dmg: [13, 38], req: { str: 52, dex: 34 }, twoHand: true },
+
   { id: 'club', name: 'Club', slot: 'weapon', kind: 'mace', w: 1, h: 3, tier: 1, dmg: [1, 6], req: { str: 0, dex: 0 } },
   { id: 'spikedclub', name: 'Spiked Club', slot: 'weapon', kind: 'mace', w: 1, h: 3, tier: 2, dmg: [5, 8], req: { str: 25, dex: 0 } },
   { id: 'mace', name: 'Mace', slot: 'weapon', kind: 'mace', w: 1, h: 3, tier: 2, dmg: [3, 10], req: { str: 27, dex: 0 }, flanged: true },

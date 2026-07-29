@@ -93,6 +93,175 @@ const MARKS = [
 
 const MARK_HI = { fire: '#ffd060', cold: '#e8f8ff', light: '#eef2ff' };
 
+const HAFT = ramp('#5a4028');
+
+// The Barbarian's marks, on the same principle as the spell marks above and one
+// rule stricter: Combat takes 0-9 and Warcries takes 10-19 with nothing shared,
+// because those two trees stand side by side in two shades of the same warm
+// hue and a repeated shape would read as the same skill twice. The Masteries
+// borrow the shape of the weapon or the virtue they train — a mastery always
+// carries the passive rule along its top edge, so it cannot be mistaken for
+// the skill it borrowed from.
+const BARB_MARKS = [
+  // 0 wedge — an axe head on a haft
+  (b, rm, hi) => {
+    capsule(b, 13, 27, 1.6, 13, 5, 1.4, HAFT);
+    polyF(b, [13, 6, 24, 9, 22, 18, 13, 16], rm.base);
+    polyF(b, [13, 6, 24, 9, 17, 10], hi);
+  },
+  // 1 crossed shafts
+  (b, rm, hi) => {
+    capsule(b, 5, 25, 1.8, 25, 5, 1.8, rm);
+    capsule(b, 25, 25, 1.8, 5, 5, 1.8, rm);
+    ellipseF(b, 15, 15, 2.4, 2.4, hi);
+  },
+  // 2 boot, going somewhere
+  (b, rm, hi) => {
+    polyF(b, [10, 6, 17, 6, 18, 17, 26, 20, 26, 25, 9, 25], rm.base);
+    lineP(b, 3, 11, 8, 11, hi);
+    lineP(b, 2, 17, 7, 17, hi);
+  },
+  // 3 stars, the kind you see
+  (b, rm, hi) => {
+    for (let i = 0; i < 4; i++) {
+      const a = i * (Math.PI / 2) + 0.4;
+      capsule(b, 15 + Math.cos(a) * 4, 15 + Math.sin(a) * 4, 2.4,
+        15 + Math.cos(a) * 12, 15 + Math.sin(a) * 12, 0.8, rm);
+    }
+    ellipseF(b, 15, 15, 3, 3, hi);
+  },
+  // 4 a pair, thrown apart
+  (b, rm, hi) => {
+    polyF(b, [3, 9, 12, 6, 13, 14, 5, 15], rm.base);
+    polyF(b, [18, 16, 27, 13, 28, 21, 20, 22], rm.base);
+    lineP(b, 13, 13, 19, 18, hi);
+  },
+  // 5 an arc that lands
+  (b, rm, hi) => {
+    capsule(b, 3, 21, 1.6, 10, 7, 1.6, rm);
+    capsule(b, 10, 7, 1.6, 20, 16, 1.6, rm);
+    for (let i = -1; i <= 1; i++) capsule(b, 20, 18, 1.6, 20 + i * 6, 26, 0.8, rm);
+    ellipseF(b, 20, 17, 2.2, 2.2, hi);
+  },
+  // 6 a closed fist
+  (b, rm, hi) => {
+    polyF(b, [8, 10, 22, 10, 23, 20, 8, 20], rm.base);
+    for (let i = 0; i < 3; i++) ellipseF(b, 11 + i * 5, 10, 2.4, 2.4, rm.light);
+    rectF(b, 8, 20, 15, 4, rm.dark);
+    lineP(b, 9, 15, 22, 15, hi);
+  },
+  // 7 chevrons, stacking
+  (b, rm) => {
+    for (let i = 0; i < 2; i++) {
+      const y = 10 + i * 9;
+      capsule(b, 6, y - 2, 2, 15, y + 6, 2, rm);
+      capsule(b, 15, y + 6, 2, 24, y - 2, 2, rm);
+    }
+  },
+  // 8 a spiral
+  (b, rm) => {
+    let px = 15, py = 15;
+    for (let i = 1; i <= 13; i++) {
+      const a = i * 0.9, r = i * 0.95;
+      const x = 15 + Math.cos(a) * r, y = 15 + Math.sin(a) * r;
+      capsule(b, px, py, 1.5, x, y, 1.5, rm);
+      px = x; py = y;
+    }
+  },
+  // 9 a horned skull
+  (b, rm, hi) => {
+    ellipse(b, 15, 14, 7, 7, rm);
+    ellipseF(b, 12, 13, 1.9, 1.9, 0);
+    ellipseF(b, 18, 13, 1.9, 1.9, 0);
+    for (let i = 0; i < 3; i++) rectF(b, 12 + i * 2.4, 20, 1.6, 4, rm.dark);
+    capsule(b, 9, 9, 1.7, 3, 3, 0.8, rm);
+    capsule(b, 21, 9, 1.7, 27, 3, 0.8, rm);
+    ellipseF(b, 15, 17, 1.4, 1.4, hi);
+  },
+  // 10 nested cry arcs
+  (b, rm, hi) => {
+    for (let i = 0; i < 3; i++) {
+      const r = 5 + i * 4;
+      capsule(b, 9 + r * 0.5, 15 - r * 0.8, 1.5, 9 + r, 15, 1.5, rm);
+      capsule(b, 9 + r, 15, 1.5, 9 + r * 0.5, 15 + r * 0.8, 1.5, rm);
+    }
+    ellipseF(b, 7, 15, 2, 2, hi);
+  },
+  // 11 a flask
+  (b, rm, hi) => {
+    capsule(b, 15, 13, 2.4, 15, 6, 2.0, rm);
+    ellipse(b, 15, 19, 7.5, 7.5, rm);
+    ellipseF(b, 15, 20, 4.4, 4.4, hi);
+    rectF(b, 13, 3, 5, 3, rm.dark);
+  },
+  // 12 a crook, beckoning
+  (b, rm, hi) => {
+    capsule(b, 20, 27, 1.9, 20, 13, 1.7, rm);
+    capsule(b, 20, 13, 1.7, 12, 6, 1.5, rm);
+    capsule(b, 12, 6, 1.5, 6, 12, 1.3, rm);
+    ellipseF(b, 6, 13, 2.2, 2.2, hi);
+  },
+  // 13 an anvil
+  (b, rm, hi) => {
+    polyF(b, [4, 10, 26, 10, 22, 15, 18, 15, 18, 21, 12, 21, 12, 15, 7, 15], rm.base);
+    rectF(b, 9, 21, 12, 3, rm.dark);
+    lineP(b, 5, 10, 25, 10, hi);
+  },
+  // 14 a cut gem
+  (b, rm, hi) => {
+    polyF(b, [15, 3, 25, 13, 15, 27, 5, 13], rm.base);
+    polyF(b, [15, 3, 25, 13, 15, 13], rm.light);
+    lineP(b, 5, 13, 25, 13, hi);
+  },
+  // 15 a warding rune
+  (b, rm, hi) => {
+    capsule(b, 8, 4, 1.7, 8, 26, 1.7, rm);
+    capsule(b, 8, 11, 1.5, 21, 4, 1.5, rm);
+    capsule(b, 8, 19, 1.5, 23, 12, 1.5, rm);
+    ellipseF(b, 23, 12, 2.2, 2.2, hi);
+  },
+  // 16 a banner
+  (b, rm, hi) => {
+    capsule(b, 9, 28, 1.7, 9, 3, 1.5, rm);
+    polyF(b, [10, 4, 27, 9, 10, 17], rm.base);
+    polyF(b, [10, 4, 27, 9, 10, 10], rm.light);
+    ellipseF(b, 9, 3, 2, 2, hi);
+  },
+  // 17 a headed shaft
+  (b, rm, hi) => {
+    capsule(b, 15, 28, 1.9, 15, 8, 1.6, rm);
+    capsule(b, 6, 13, 1.5, 24, 13, 1.5, rm);
+    polyF(b, [15, 2, 20, 8, 15, 14, 10, 8], rm.base);
+    polyF(b, [15, 2, 20, 8, 15, 8], hi);
+  },
+  // 18 a burst
+  (b, rm, hi) => {
+    const pts = [];
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const r = i % 2 ? 6 : 13;
+      pts.push(15 + Math.cos(a) * r, 15 + Math.sin(a) * r);
+    }
+    polyF(b, pts, rm.base);
+    ellipseF(b, 15, 15, 3.4, 3.4, hi);
+  },
+  // 19 a crown
+  (b, rm, hi) => {
+    polyF(b, [5, 22, 5, 8, 10, 15, 15, 5, 20, 15, 25, 8, 25, 22], rm.base);
+    rectF(b, 5, 22, 20, 4, rm.dark);
+    ellipseF(b, 15, 11, 1.9, 1.9, hi);
+  },
+  // 20 a leaf point — the Masteries' own, so Combat and Warcries stay disjoint
+  (b, rm, hi) => {
+    capsule(b, 15, 28, 1.7, 15, 15, 1.5, rm);
+    polyF(b, [15, 2, 20, 12, 15, 19, 10, 12], rm.base);
+    polyF(b, [15, 2, 20, 12, 15, 12], hi);
+    rectF(b, 12, 18, 7, 2, rm.dark);
+  },
+];
+
+const BARB_HI = { combat: '#ffd0b0', cries: '#ffe8b0', mastery: '#e8f0f8' };
+
 // A small glyph per skill: element-shaped, varied by index so two fire skills
 // are still distinguishable at a glance.
 function bakeSkillIcon(id) {
@@ -105,24 +274,8 @@ function bakeSkillIcon(id) {
 
   if (MARK_HI[sk.tree]) {
     MARKS[idx % MARKS.length](buf, rm, packHex(MARK_HI[sk.tree]));
-  } else if (sk.tree === 'combat') {
-    // Axe wedge on a haft.
-    capsule(buf, 13, 27, 1.6, 13, 5, 1.4, ramp('#5a4028'));
-    polyF(buf, [13, 6, 24, 9, 22, 18, 13, 16], packHex(base));
-    polyF(buf, [13, 6, 24, 9, 17, 10], ramp('#ffb090').light);
-  } else if (sk.tree === 'cries') {
-    // Nested shout arcs opening to the right.
-    for (let i = 0; i < 3; i++) {
-      const r = 5 + i * 4;
-      capsule(buf, 9 + r * 0.5, 15 - r * 0.8, 1.5, 9 + r, 15, 1.5, rm);
-      capsule(buf, 9 + r, 15, 1.5, 9 + r * 0.5, 15 + r * 0.8, 1.5, rm);
-    }
-    ellipseF(buf, 7, 15, 2, 2, packHex('#f0e0a0'));
-  } else if (sk.tree === 'mastery') {
-    // Anvil block.
-    polyF(buf, [4, 10, 26, 10, 22, 15, 18, 15, 18, 21, 12, 21, 12, 15, 7, 15], packHex(base));
-    rectF(buf, 9, 21, 12, 3, rm.dark);
-    lineP(buf, 5, 10, 25, 10, rm.light);
+  } else if (BARB_HI[sk.tree]) {
+    BARB_MARKS[idx % BARB_MARKS.length](buf, rm, packHex(BARB_HI[sk.tree]));
   } else {
     polyF(buf, [17, 2, 10, 14, 15, 14, 12, 28, 21, 12, 15, 12], packHex(base));
   }

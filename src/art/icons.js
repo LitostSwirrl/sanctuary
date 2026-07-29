@@ -62,6 +62,28 @@ function drawAxe(buf, w, h, metal, wood, double) {
   capsule(buf, cx - w * 0.1, h * 0.86, 1.6, cx + w * 0.1, h * 0.86, 1.6, metal.dark);
 }
 
+// A long haft with the work at the far end: a cleaving blade high on one side,
+// a back hook opposite it, and a spike over the top. The haft runs the full
+// height of the cell, which is what says "two hands" at icon size.
+function drawPolearm(buf, w, h, metal, wood) {
+  const cx = w / 2;
+  capsule(buf, cx, h * 0.99, 2.0, cx, h * 0.06, 1.7, wood);
+  const top = h * 0.1, bot = h * 0.3;
+  polyF(buf, [cx, top, cx + w * 0.4, h * 0.15, cx + w * 0.3, h * 0.3, cx, bot], metal.base);
+  polyF(buf, [cx, top, cx + w * 0.4, h * 0.15, cx + w * 0.18, h * 0.19], metal.light);
+  polyF(buf, [cx, h * 0.15, cx - w * 0.3, h * 0.22, cx - w * 0.28, h * 0.26, cx, h * 0.2], metal.dark);
+  polyF(buf, [cx - 1.4, h * 0.11, cx + 1.4, h * 0.11, cx, h * 0.02], metal.light);
+}
+
+// The same length of haft, sharpened instead: a leaf blade on a collar.
+function drawSpear(buf, w, h, metal, wood) {
+  const cx = w / 2;
+  capsule(buf, cx, h * 0.99, 1.8, cx, h * 0.2, 1.5, wood);
+  polyF(buf, [cx, h * 0.02, cx + w * 0.15, h * 0.13, cx, h * 0.26, cx - w * 0.15, h * 0.13], metal.base);
+  polyF(buf, [cx, h * 0.02, cx + w * 0.15, h * 0.13, cx, h * 0.26], metal.light);
+  rectF(buf, cx - w * 0.11, h * 0.24, w * 0.22, 2, metal.dark);
+}
+
 // A weighted head on a short haft. Flanges read as a mace rather than a club.
 function drawMace(buf, w, h, metal, wood, flanged) {
   const cx = w / 2;
@@ -187,6 +209,8 @@ function build(item) {
     case 'staff': drawStaff(buf, w, h, wood, gem); break;
     case 'orb': drawOrb(buf, w, h, gem, metal); break;
     case 'axe': drawAxe(buf, w, h, metal, wood, !!item.base && item.base.twoHand); break;
+    case 'polearm': drawPolearm(buf, w, h, metal, wood); break;
+    case 'spear': drawSpear(buf, w, h, metal, wood); break;
     case 'mace': drawMace(buf, w, h, metal, wood, !!item.base && item.base.flanged); break;
     case 'body': drawBody(buf, w, h, cloth, metal); break;
     case 'helm': drawHelm(buf, w, h, metal, cloth); break;

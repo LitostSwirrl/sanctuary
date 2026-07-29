@@ -95,8 +95,12 @@ export class Player extends Entity {
     // granted, which is the cold armours), and `stacks: { max, decay }` with
     // `ias`, which is Frenzy: swing speed per live stack.
     this.buffs = {};
-    this.masteryPoints = { axe: 0, mace: 0, sword: 0 }; // written by refreshPassives
+    // All written by refreshPassives, all read below in recalc.
+    this.masteryPoints = { axe: 0, mace: 0, sword: 0, polearm: 0, spear: 0 };
     this.ironSkinLevel = 0;
+    this.lifeBonusPct = 0;        // Increased Stamina
+    this.runSpeedBonusPct = 0;    // Increased Speed
+    this.resistBonus = 0;         // Natural Resistance
     this.recalc(true);
   }
 
@@ -115,7 +119,7 @@ export class Player extends Entity {
     const prevMaxHp = this.maxHp, prevMaxMana = this.maxMana;
     const bo = this.buffs.battleorders;
     const boPct = bo ? bo.mag : 0;
-    this.maxHp = maxLifeFor(this.cls, this.level, vit, t.life, t.lifePct + boPct);
+    this.maxHp = maxLifeFor(this.cls, this.level, vit, t.life, t.lifePct + boPct + (this.lifeBonusPct || 0));
     this.maxMana = maxManaFor(this.cls, this.level, ene, t.mana, t.manaPct + boPct);
 
     const armour = t.def * (1 + t.defPct / 100);
@@ -131,19 +135,22 @@ export class Player extends Entity {
 
     for (const el of ['fire', 'cold', 'light', 'pois']) {
       const key = 'res' + el[0].toUpperCase() + el.slice(1);
-      this.resists[el] = Math.min(RES_CAP, t[key] + t.resAll);
+      this.resists[el] = Math.min(RES_CAP, t[key] + t.resAll + (this.resistBonus || 0));
     }
     this.damageReduction = t.dr;
     this.magicFind = t.mf;
     this.goldFind = t.gf;
     this.castRate = t.fcr;
-    this.runSpeed = 4.6 * (1 + t.frw / 200);
+    this.runSpeed = 4.6 * (1 + t.frw / 200) * (1 + (this.runSpeedBonusPct || 0) / 100);
     this.speed = this.runSpeed;
 
     // Weapon damage. Bare-handed is deliberately feeble: this is a caster —
     // or it was; a mastery folds in for the matching weapon kind so the
     // sheet stays honest.
-    const MASTERY_KIND = { axe: 'axe', mace: 'mace', sword: 'sword', blade: 'sword' };
+    const MASTERY_KIND = {
+      axe: 'axe', mace: 'mace', sword: 'sword', blade: 'sword',
+      polearm: 'polearm', spear: 'spear',
+    };
     const wpn = this.equipment.weapon;
     const mk = wpn ? MASTERY_KIND[wpn.kind] : null;
     const mp = mk ? (this.masteryPoints[mk] || 0) : 0;
