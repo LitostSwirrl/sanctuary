@@ -180,3 +180,90 @@ run is what actually proves the single-file, no-server claim.
   `verifyReachable` has its own solid-aware flood for exactly that reason.
 - Serve with `node serve.js` (not `python3 -m http.server`). It sends no-store, and a
   cached ES module once made a real fix look like it had failed.
+
+## The try-out polish batch (2026-07-29, in flight)
+
+Joseph wanted the game sampleable without the grind, then flagged three gaps: no shop
+scrolling, no music, and the whole look reading "Minecraft" when the target is Diablo 2 LoD.
+Tracked in `polish-checkpoints.md`.
+
+- **Maxed start** (done): `newGame` levels every character to the cap through `gainXp`, sets
+  all 14 class skills to 20, spends stat points evenly, grants 50000 gold. One marked block
+  in `main.js`; delete it to restore the level-1 start.
+- **Best-in-slot gear** (done): `forgeItem` in `items/item.js` builds fixed-roll rares —
+  same shape `rollItem` produces, mods handed in. `BEST_GEAR` in `main.js` defines per-class
+  loadouts: six max-roll distinct-mod lines per slot, belts of top potions. Both classes
+  verified in-browser: resists capped, sorc +6 per tree / 150 fcr, barb 115-168 per swing
+  with 18% steal. A recalc now runs between equipping and `refreshPassives` so the masteries
+  read the amulet's +skills the same way on a fresh start and a loaded save.
+- **Next**: shop scroll wheel, then procedural BGM, then the LoD-direction art overhaul
+  (figures, terrain, palette/light).
+
+### Shop scrolling and the music engine (same day)
+
+The vendor list now scrolls: `ui.vendorScroll` counts whole rows, the main loop feeds it
+`Input.mouse.wheel` while the shop is open, and `drawVendor` clamps it, culls rows to the
+viewport (no partial rows, so no clipping), and draws a track-and-thumb when the stock
+overflows. Verified against a 20-row stock: clamp at 8, wheel both directions, thumb
+position confirmed by pixel probe.
+
+Music: `playMusic(mode)` in `audio/synth.js`, driven by `ambient(level)` so it follows area
+transitions with no new wiring in main.js. Three moods from the same oscillator primitives
+as the effects — camp: eight bars of finger-picked A-minor arpeggios (Am F C G / Am F Dm E)
+over a swelling bass root; wilds: sparse pentatonic sines over the drone with whole bars of
+rest; dungeon: a lowpass-noise war drum, sawtooth fragments on minor seconds and the
+tritone, a rare slow shimmer. A 300 ms timer keeps 1.5 s scheduled ahead; a mode change
+fades the whole bus in half a second. Verified in-browser: modes map town/moor/den
+correctly, bars keep advancing, mute holds and releases, console clean. What no automation
+can judge is whether it sounds good — that is Joseph's ear.
+
+## The art overhaul, and the boost widened (2026-07-29)
+
+**What.** The whole look moved toward Diablo 2 LoD. Figures: the shared skeleton went from
+four-heads-tall chunk to five-and-a-half heads — legs as long as head and torso together, heads
+about a fifth smaller, shoulders wider, a V-tapered trunk, a trapezius yoke welding arms to chest
+(the outline pass used to sever them at the shoulder), deltoid-weighted upper arms, and robes that
+are flared skirts stopping mid-shin instead of tubes. Shading: `shadeOf` in `art/pixel.js` now
+recovers the implied sphere normal's z component, lights it, and picks from five ramp bands (new
+`hi`/`deep` entries in `ramp()`) with a checkerboard dither at each boundary — capsules read as lit
+volumes instead of three flat stripes. Ankles fade toward the ground and the renderer's blob shadow
+tightened to a hard pool (1.05x radius, 0.46 alpha). Terrain: per-tile independent noise variants
+are gone. Each terrain bakes one seamless 256x128 wrapping value-noise field and every tile cuts
+its own 64x32 window by screen-lattice position (`getGround` indexes by `(wx-wy)&7, (wx+wy)&7`), so
+texture flows across tile edges and the grid disappears; the broad octave is two tiles wide because
+at one tile its blobs land in step with the lattice and the grid ghosts back. Built floors
+(cobble/crypt) instead read as two-tile masonry slabs with per-slab tone. Walls lost their
+per-block outline — that outline was most of the Minecraft look — and share three face variants
+with seam joints; their tops are cut from the same field as the ground so a plateau reads as one
+landform. Light: every area's ambient dropped roughly a quarter, pools got a hot core with a long
+dim tail, the player torch tightened from 12 to 8.5 tiles and warmed, and a vignette multiplies
+into the light buffer so corners sink no matter what the lights do. Terrain colours darker and
+greyer across the board; skin tones out of toy-pink; trees darker and scragglier; rocks no longer
+glow against the ground.
+
+**Boost widened (same day, mid-flow request).** Gold is now 9,999,999; all three waypoints
+(town, Cold Plains, Catacombs) come pre-lit on a new character; and the try-out gear is the
+classic endgame loadout as real gold uniques. `items/uniques.js` grew a chase tier — Harlequin
+Crest, Stone of Jordan, Mara's Kaleidoscope, The Oculus, Skin of the Vipermagi, Magefist, War
+Traveler, Arachnid Mesh, Lidless Wall for the Sorceress; Schaefer's Hammer, Stormshield,
+Shaftstop, Steelrend, String of Ears, double Bul-Kathos' Wedding Band for the Barbarian — names
+and mod shapes verified against Arreat Summit (classic.battle.net), numbers cut to this slice per
+the file's charter. `forgeItem` accepts a rarity/flavour opts argument, and `BEST_GEAR` in main.js
+maps slot to unique name. The lower-gated pieces can also drop in the deepest floors. D2's green
+sets (Tal Rasha's Wrappings, Immortal King) were confirmed real but this slice has no set-bonus
+mechanics, so uniques stay the gold tier here.
+
+**Trade-offs made knowingly.** Canon shapes replaced stat-stuffed forged rares: the Sorceress
+drops to 216 life (glass cannon, as the original) while gaining +12 all skills and 120 fcr with
+resists at the 75 cap; the Barbarian swings 141-577 with 18% steal and 49 flat damage reduction
+but sits at 25 fire/poison resist — real D2 barbs ran under-capped too, and one line in
+`uniques.js` retunes any piece if that stings in play.
+
+**Measured.** Full art bake 358 ms against the ~600 ms budget (the field cuts are cheaper than
+the old per-variant FBM and pay for the costlier figure shading). Render 1.82 ms median at
+3840x1814. Console clean across load, both classes, all six areas, vendor, waypoint and
+inventory panels.
+
+**Not machine-verifiable here.** How the darkness feels in real play (a 27" monitor at night is
+not a screenshot), whether 8.5 tiles of torch is too tight while kiting, and the balance of the
+canon loadout against Andariel — those need Joseph's hands on it.

@@ -201,6 +201,41 @@ export function rollItem(rng, ilvl, opts = {}) {
   return item;
 }
 
+// A fixed-roll item for scripted grants: the same shape rollItem produces,
+// with the mods handed in rather than rolled. Defence comes out at the base's
+// top end; enhanced damage and defence percent fold in exactly as in rollItem.
+export function forgeItem(baseId, name, mods, ilvl = 30, opts = {}) {
+  const base = BASE_BY_ID[baseId];
+  if (!base) return null;
+  const item = {
+    uid: nextItemId++,
+    baseId: base.id, base, slot: base.slot, kind: base.kind,
+    w: base.w, h: base.h, ilvl,
+    rarity: opts.rarity || 'rare',
+    flavour: opts.flavour,
+    name,
+    affixes: Object.keys(mods).map((k) => ({ mod: k, value: mods[k], fixed: true })),
+    mods: { ...mods },
+    req: { str: base.req.str, dex: base.req.dex },
+    twoHand: !!base.twoHand,
+    caster: !!base.caster,
+    identified: true,
+  };
+  if (base.dmg) {
+    const ed = item.mods.ed || 0;
+    item.minDmg = Math.max(1, Math.floor(base.dmg[0] * (1 + ed / 100)) + (item.mods.minDmg || 0));
+    item.maxDmg = Math.max(item.minDmg + 1, Math.floor(base.dmg[1] * (1 + ed / 100)) + (item.mods.maxDmg || 0));
+  }
+  if (base.def !== undefined) {
+    item.defense = Math.floor(base.def[1] * (1 + (item.mods.defPct || 0) / 100)) + (item.mods.def || 0);
+    item.mods.def = item.defense;
+    item.mods.defPct = 0;
+  }
+  if (base.block) item.block = base.block;
+  item.price = priceOf(item);
+  return item;
+}
+
 export function makePotion(id) {
   const p = POTION_BY_ID[id];
   if (!p) return null;

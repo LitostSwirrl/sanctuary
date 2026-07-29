@@ -1,17 +1,22 @@
 // Ground tiles, wall blocks and scenery props, all generated.
 //
 // Ground is the classic 64x32 isometric diamond whose row widths interlock
-// exactly, so neighbouring tiles leave no seam and no gap. Several variants per
-// terrain are baked and chosen by a hash of the tile coordinate, which breaks
-// up repetition without storing a map of which variant went where.
+// exactly, so neighbouring tiles leave no seam and no gap. The texture inside
+// the diamonds is cut from one seamless noise field per terrain, anchored to
+// the screen lattice: a tile shows whichever window of the field its world
+// position lands on, so the dirt flows across tile edges and the grid
+// disappears. The field wraps every eight tiles along each lattice axis,
+// far enough apart that the repeat never reads.
 
-import { Buf, px, rectF, ellipse, ellipseF, capsule, polyF, outline, lineP, bufToCanvas } from './pixel.js';
+import { Buf, px, rectF, ellipse, ellipseF, capsule, polyF, outline, lineP, bufToCanvas, blitBuf } from './pixel.js';
 import { ramp, packHex, packRGB, shift, COLORS } from './palette.js';
 import { Rng, fbm2 } from '../core/rng.js';
 
 export const TW = 64, TH = 32;
-const VARIANTS = 8;
 const OUTLINE = packHex('#0c0a10');
+
+// The seamless field covers an 8x8 patch of the same-parity diamond lattice.
+const FIELD_W = 256, FIELD_H = 128;
 
 // Row spans of the isometric diamond. Rows 15 and 16 are both full width.
 function rowSpan(y) {
@@ -20,104 +25,177 @@ function rowSpan(y) {
   return { x0: 32 - w / 2, w };
 }
 
-// `rough` is how hard the noise modulates lightness and `grain` how fine the
-// features are. Built floors want low rough and high grain or the same blob
-// shows up on every slab and the repeat becomes obvious.
+// `rough` is how hard the noise modulates lightness. Kept low for built
+// floors, whose variation comes from slab-to-slab tone instead of dirt.
+// Everything a shade darker and greyer than a daylight game would pick:
+// the ground is what the light pass has to sell as oppressive.
 export const TERRAIN = {
-  grass:  { base: '#46552f', alt: '#3a4a28', speck: '#5f7038', rough: 0.34, grain: 0.20 },
-  dirt:   { base: '#5b4a33', alt: '#4c3d2a', speck: '#6d5a3f', rough: 0.34, grain: 0.22 },
-  cobble: { base: '#57544c', alt: '#494640', speck: '#68645a', rough: 0.14, grain: 0.30 },
-  cave:   { base: '#3b372f', alt: '#302d27', speck: '#4a4539', rough: 0.42, grain: 0.20 },
-  crypt:  { base: '#464650', alt: '#3a3a44', speck: '#565663', rough: 0.13, grain: 0.32 },
-  blood:  { base: '#4a2622', alt: '#3a1c1a', speck: '#5e302a', rough: 0.38, grain: 0.22 },
-  snow:   { base: '#7d8290', alt: '#6b7080', speck: '#949aa8', rough: 0.20, grain: 0.26 },
+  grass:  { base: '#3e4829', alt: '#333d24', speck: '#4e5c30', rough: 0.30 },
+  dirt:   { base: '#4f4130', alt: '#433626', speck: '#5e4f38', rough: 0.32 },
+  cobble: { base: '#4c4941', alt: '#403e37', speck: '#5a564c', rough: 0.16 },
+  cave:   { base: '#322e27', alt: '#282520', speck: '#3e3930', rough: 0.36 },
+  crypt:  { base: '#3e3e48', alt: '#33333c', speck: '#4c4c58', rough: 0.15 },
+  blood:  { base: '#402220', alt: '#331b19', speck: '#522823', rough: 0.34 },
+  snow:   { base: '#6f7482', alt: '#5f6472', speck: '#848a98', rough: 0.22 },
 };
 
 // ------------------------------------------------------------------- ground
 
-function bakeGroundVariant(terrain, rng) {
-  const t = TERRAIN[terrain];
-  const buf = new Buf(TW, TH);
-  const noise = fbm2(rng, 3);
-  const base = packHex(t.base);
-  const alt = packHex(t.alt);
-  const nx = rng.range(0, 100), ny = rng.range(0, 100);
+// Smooth value noise that wraps at exactly (pw, ph) pixels, so anything cut
+// on that period tiles with itself. `cell` is the lattice spacing and must
+// divide both periods.
+function wrapNoise(rng, pw, ph, cell) {
+  const gw = (pw / cell) | 0, gh = (ph / cell) | 0;
+  const grid = new Float32Array(gw * gh);
+  for (let i = 0; i < grid.length; i++) grid[i] = rng.f();
+  const smooth = (t) => t * t * (3 - 2 * t);
+  return (x, y) => {
+    let fx = (x / cell) % gw; if (fx < 0) fx += gw;
+    let fy = (y / cell) % gh; if (fy < 0) fy += gh;
+    const x0 = fx | 0, y0 = fy | 0;
+    const x1 = (x0 + 1) % gw, y1 = (y0 + 1) % gh;
+    const tx = smooth(fx - x0), ty = smooth(fy - y0);
+    const a = grid[y0 * gw + x0], b = grid[y0 * gw + x1];
+    const c = grid[y1 * gw + x0], d = grid[y1 * gw + x1];
+    const top = a + (b - a) * tx, bot = c + (d - c) * tx;
+    return top + (bot - top) * ty;
+  };
+}
 
-  for (let y = 0; y < TH; y++) {
-    const { x0, w } = rowSpan(y);
-    for (let x = x0; x < x0 + w; x++) {
-      const n = noise(nx + x * t.grain, ny + y * t.grain * 2);
-      const v = (n - 0.5) * t.rough;
-      const c = n > 0.52 ? base : alt;
-      const r = Math.max(0, Math.min(255, (c & 255) * (1 + v)));
-      const g = Math.max(0, Math.min(255, ((c >>> 8) & 255) * (1 + v)));
-      const b = Math.max(0, Math.min(255, ((c >>> 16) & 255) * (1 + v)));
-      px(buf, x, y, packRGB(r, g, b, 255));
+const clampB = (v) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
+const mulC = (c, k) => packRGB(clampB((c & 255) * k), clampB(((c >>> 8) & 255) * k), clampB(((c >>> 16) & 255) * k), 255);
+
+// One seamless texture per terrain. Three octaves: broad patches, a mid
+// grain, and a fine speckle. The broad cell is two tiles wide on purpose --
+// at exactly one tile it drops its blobs in step with the lattice and the
+// grid ghosts right back. y samples doubled so the features stretch 2:1 like
+// the projection.
+function bakeGroundField(terrain, rng) {
+  const t = TERRAIN[terrain];
+  const patch = wrapNoise(rng.fork('patch'), FIELD_W, FIELD_H * 2, 128);
+  const mid = wrapNoise(rng.fork('mid'), FIELD_W, FIELD_H * 2, 16);
+  const grain = wrapNoise(rng.fork('grain'), FIELD_W, FIELD_H * 2, 8);
+  const buf = new Buf(FIELD_W, FIELD_H);
+  const base = packHex(t.base), alt = packHex(t.alt);
+
+  for (let y = 0; y < FIELD_H; y++) {
+    for (let x = 0; x < FIELD_W; x++) {
+      const p = patch(x, y * 2), m = mid(x, y * 2), g = grain(x, y * 2);
+      const c = p * 0.6 + m * 0.4 > 0.5 ? base : alt;
+      const v = ((p - 0.5) * 0.8 + (m - 0.5) * 0.7 + (g - 0.5) * 0.9) * t.rough;
+      buf.data[y * FIELD_W + x] = packRGB(
+        clampB((c & 255) * (1 + v)),
+        clampB(((c >>> 8) & 255) * (1 + v)),
+        clampB(((c >>> 16) & 255) * (1 + v)), 255);
     }
   }
 
-  // Terrain-specific detail passes.
-  if (terrain === 'cobble' || terrain === 'crypt') {
-    // Joint lines along all four diamond edges, so slabs read as slabs.
-    const jc = shift(t.alt, -0.09);
-    lineP(buf, 0, 16, 32, 0, jc);
-    lineP(buf, 32, 0, 64, 16, jc);
-    lineP(buf, 0, 16, 32, 31, jc);
-    lineP(buf, 32, 31, 64, 16, jc);
-  }
+  // Detail is scattered over the whole field, so tufts and pebbles straddle
+  // tile edges like anything else.
+  const rd = rng.fork('detail');
   if (terrain === 'grass') {
     const tuft = packHex(t.speck);
-    for (let i = 0; i < 14; i++) {
-      const y = rng.int(2, TH - 3);
-      const { x0, w } = rowSpan(y);
-      if (w < 8) continue;
-      const x = rng.int(x0 + 2, x0 + w - 3);
+    const dim = shift(t.speck, -0.06);
+    for (let i = 0; i < 170; i++) {
+      const x = rd.i(FIELD_W), y = rd.int(1, FIELD_H - 2);
       px(buf, x, y, tuft);
       px(buf, x, y - 1, tuft);
-      if (rng.chance(0.4)) px(buf, x + 1, y, tuft);
+      if (rd.chance(0.5)) px(buf, x + 1, y, dim);
     }
   }
-  if (terrain === 'cave' || terrain === 'dirt' || terrain === 'snow') {
-    const sp = packHex(t.speck);
-    for (let i = 0; i < 10; i++) {
-      const y = rng.int(2, TH - 3);
-      const { x0, w } = rowSpan(y);
-      if (w < 8) continue;
-      const x = rng.int(x0 + 2, x0 + w - 3);
-      ellipseF(buf, x, y, rng.range(0.8, 2.0), rng.range(0.6, 1.2), sp);
+  if (terrain === 'dirt' || terrain === 'cave' || terrain === 'snow') {
+    for (let i = 0; i < 70; i++) {
+      const sp = rd.chance(0.5) ? packHex(t.speck) : shift(t.alt, -0.05);
+      ellipseF(buf, rd.i(FIELD_W), rd.i(FIELD_H), rd.range(0.8, 2.2), rd.range(0.6, 1.3), sp);
     }
   }
   if (terrain === 'blood') {
-    const sp = packRGB(90, 20, 18, 255);
-    for (let i = 0; i < 6; i++) {
-      const y = rng.int(4, TH - 5);
-      const { x0, w } = rowSpan(y);
-      if (w < 12) continue;
-      const x = rng.int(x0 + 3, x0 + w - 4);
-      ellipseF(buf, x, y, rng.range(1.5, 4), rng.range(1, 2), sp);
+    const sp = packRGB(84, 22, 18, 255);
+    for (let i = 0; i < 22; i++) {
+      ellipseF(buf, rd.i(FIELD_W), rd.i(FIELD_H), rd.range(1.5, 4.5), rd.range(1, 2.4), sp);
     }
   }
 
-  return bufToCanvas(buf);
+  // Built floors read as masonry, but on two-tile slabs: joints on the
+  // doubled lattice with a per-slab tone step. Slabs big enough that the
+  // masonry does not trace the gameplay grid back onto the screen.
+  if (terrain === 'cobble' || terrain === 'crypt') {
+    const joint = shift(t.alt, -0.06);
+    for (let a = -2; a <= 4; a++) {
+      for (let b = -2; b <= 4; b++) {
+        if ((a + b) & 1) continue;
+        const cx = a * 64, cy = b * 32;
+        let h = (Math.imul(a & 3, 73856093) ^ Math.imul(b & 3, 19349663)) >>> 0;
+        h = (h ^ (h >>> 13)) & 1023;
+        const k = 1 + (h / 1023 - 0.5) * 0.11;
+        for (let dy = -32; dy < 32; dy++) {
+          const yy = cy + dy;
+          if (yy < 0 || yy >= FIELD_H) continue;
+          const half = 64 - 2 * Math.abs(dy);
+          for (let dx = -half; dx < half; dx++) {
+            const xx = cx + dx;
+            if (xx < 0 || xx >= FIELD_W) continue;
+            const i = yy * FIELD_W + xx;
+            buf.data[i] = mulC(buf.data[i], k);
+          }
+        }
+        lineP(buf, cx - 64, cy, cx, cy - 32, joint);
+        lineP(buf, cx, cy - 32, cx + 64, cy, joint);
+      }
+    }
+  }
+
+  return buf;
+}
+
+// Cut one 64x32 diamond out of the field at the given offset, wrapping.
+function cutDiamond(field, ox, oy) {
+  const buf = new Buf(TW, TH);
+  for (let y = 0; y < TH; y++) {
+    const { x0, w } = rowSpan(y);
+    let sy = (oy + y) % FIELD_H; if (sy < 0) sy += FIELD_H;
+    for (let x = x0; x < x0 + w; x++) {
+      let sx = (ox + x) % FIELD_W; if (sx < 0) sx += FIELD_W;
+      buf.data[y * TW + x] = field.data[sy * FIELD_W + sx];
+    }
+  }
+  return buf;
+}
+
+// All 64 windows onto the field. Half the slots can never be asked for (the
+// two lattice axes always share parity) but baking them all keeps the
+// indexing trivial and the cuts are cheap.
+function bakeGroundSet(field) {
+  const set = new Array(64);
+  for (let ai = 0; ai < 8; ai++) {
+    for (let bi = 0; bi < 8; bi++) {
+      set[(ai << 3) | bi] = bufToCanvas(cutDiamond(field, ai * 32 - 32, bi * 16 - 16));
+    }
+  }
+  return set;
 }
 
 // ------------------------------------------------------------------- walls
 
 // Indoors these are built walls: tall, with the same material top and face.
-// Outdoors they are raised banks, so the face is exposed rock and the top keeps
-// the terrain colour. Grass-topped cubes of full wall height read as an
-// artificial maze rather than landscape.
+// Outdoors they are raised banks, so the face is exposed rock and the top
+// continues the terrain, cut from the same seamless field as the ground so a
+// plateau reads as one landform. No outline around wall blocks: a per-block
+// silhouette is exactly what used to draw a grid over every rock mass.
 const WALL_STYLE = {
-  cave:   { face: '#4b4438', top: '#5a5244', h: 46, built: true },
-  crypt:  { face: '#52505a', top: '#63606c', h: 46, built: true },
-  cobble: { face: '#5a5348', top: '#6b6355', h: 42, built: true },
-  grass:  { face: '#5c5140', top: '#46552f', h: 26 },
-  dirt:   { face: '#5c5140', top: '#5b4a33', h: 24 },
-  blood:  { face: '#4a3a30', top: '#4a2622', h: 26 },
-  snow:   { face: '#6b7080', top: '#7d8290', h: 26 },
+  cave:   { face: '#3f3a30', top: '#4a453a', h: 46, built: true },
+  crypt:  { face: '#46444e', top: '#55525e', h: 46, built: true },
+  cobble: { face: '#4c463c', top: '#575043', h: 42, built: true },
+  grass:  { face: '#4c4335', h: 26 },
+  dirt:   { face: '#4c4335', h: 24 },
+  blood:  { face: '#3e3128', h: 26 },
+  snow:   { face: '#5c6170', h: 26 },
 };
 
-function bakeWall(terrain, rng) {
+// The two visible faces of one block, top left empty. Face texture does not
+// need to be seamless across blocks: the dark joint down each side sells the
+// seam as a deliberate break, masonry on built walls and a crevice on rock.
+function bakeWallFace(terrain, rng) {
   const s = WALL_STYLE[terrain] || WALL_STYLE.cave;
   const H = s.h;
   const buf = new Buf(TW, TH + H);
@@ -126,24 +204,13 @@ function bakeWall(terrain, rng) {
 
   const faceL = shift(s.face, -0.07);
   const faceR = shift(s.face, 0.03);
-  const topC = packHex(s.top);
   const shade = (c, x, y, amt) => {
     const n = (noise(nx + x * 0.12, ny + y * 0.12) - 0.5) * amt;
-    return packRGB(
-      Math.max(0, Math.min(255, (c & 255) * (1 + n))),
-      Math.max(0, Math.min(255, ((c >>> 8) & 255) * (1 + n))),
-      Math.max(0, Math.min(255, ((c >>> 16) & 255) * (1 + n))),
-      255);
+    return mulC(c, 1 + n);
   };
 
-  // Left face, then right face, then the top so it overlays cleanly.
   polyF(buf, [0, 16, 32, 31, 32, 31 + H, 0, 16 + H], 0, (x, y) => shade(faceL, x, y, 0.34));
   polyF(buf, [32, 31, 64, 16, 64, 16 + H, 32, 31 + H], 0, (x, y) => shade(faceR, x, y, 0.34));
-
-  for (let y = 0; y < TH; y++) {
-    const { x0, w } = rowSpan(y);
-    for (let x = x0; x < x0 + w; x++) px(buf, x, y, shade(topC, x, y, 0.24));
-  }
 
   // Masonry courses on built walls, cracks on natural rock.
   if (s.built && (terrain === 'crypt' || terrain === 'cobble')) {
@@ -161,8 +228,56 @@ function bakeWall(terrain, rng) {
     }
   }
 
-  outline(buf, OUTLINE);
-  return { canvas: bufToCanvas(buf), ox: 32, oy: 16 + H };
+  const joint = packRGB(0, 0, 0, 60);
+  lineP(buf, 0, 16, 0, 16 + H, joint);
+  lineP(buf, 63, 16, 63, 16 + H, joint);
+  lineP(buf, 32, 31, 32, 31 + H, packRGB(0, 0, 0, 45));
+  return buf;
+}
+
+// Built walls cap with their own stone texture; small field, same wrap.
+function bakeTopField(s, rng) {
+  const n1 = wrapNoise(rng.fork('a'), FIELD_W, FIELD_H * 2, 32);
+  const n2 = wrapNoise(rng.fork('b'), FIELD_W, FIELD_H * 2, 8);
+  const buf = new Buf(FIELD_W, FIELD_H);
+  const c0 = packHex(s.top);
+  for (let y = 0; y < FIELD_H; y++) {
+    for (let x = 0; x < FIELD_W; x++) {
+      const v = ((n1(x, y * 2) - 0.5) * 0.7 + (n2(x, y * 2) - 0.5) * 0.5) * 0.22;
+      buf.data[y * FIELD_W + x] = mulC(c0, 1 + v);
+    }
+  }
+  return buf;
+}
+
+// Compose the 64 lattice variants: shared faces, top cut from the field at
+// the block's own offset (raised by the wall height, so neighbouring tops
+// still line up with each other).
+function bakeWallSet(terrain, groundField, rng) {
+  const s = WALL_STYLE[terrain] || WALL_STYLE.cave;
+  const H = s.h;
+  const faces = [];
+  for (let i = 0; i < 3; i++) faces.push(bakeWallFace(terrain, rng.fork('face' + i)));
+  const topField = s.built ? bakeTopField(s, rng.fork('top')) : groundField;
+  const topShade = s.built ? 1 : 0.88;
+
+  const set = new Array(64);
+  for (let ai = 0; ai < 8; ai++) {
+    for (let bi = 0; bi < 8; bi++) {
+      const buf = new Buf(TW, TH + H);
+      blitBuf(buf, faces[(ai * 5 + bi * 3) % 3], 0, 0);
+      const top = cutDiamond(topField, ai * 32 - 32, bi * 16 - 16 - H);
+      for (let y = 0; y < TH; y++) {
+        for (let x = 0; x < TW; x++) {
+          const c = top.data[y * TW + x];
+          if (!(c >>> 24)) continue;
+          buf.data[y * TW + x] = topShade === 1 ? c : mulC(c, topShade);
+        }
+      }
+      set[(ai << 3) | bi] = { canvas: bufToCanvas(buf), ox: 32, oy: 16 + H };
+    }
+  }
+  return set;
 }
 
 // -------------------------------------------------------------------- props
@@ -171,17 +286,19 @@ function bakeWall(terrain, rng) {
 // centre it stands on, so drawing is always at (screenX - ox, screenY - oy).
 function propTree(rng) {
   const buf = new Buf(88, 116);
-  const bark = ramp(COLORS.wood);
-  const leaf = ramp(rng.chance(0.5) ? '#354a26' : '#2c3f21');
+  const bark = ramp('#453120');
+  const leaf = ramp(rng.chance(0.5) ? '#2a3a1e' : '#233218');
   const lean = rng.range(-4, 4);
   capsule(buf, 44, 112, 7, 44 + lean, 58, 4.5, bark);
   for (let i = 0; i < 4; i++) {
     const a = rng.range(0, Math.PI * 2);
     capsule(buf, 44 + lean * 0.7, 68, 3.2, 44 + lean + Math.cos(a) * 16, 56 + Math.sin(a) * 8, 1.2, bark);
   }
-  for (let i = 0; i < 10; i++) {
-    const cx = 44 + lean + rng.range(-22, 22), cy = 38 + rng.range(-20, 16);
-    ellipse(buf, cx, cy, rng.range(12, 21), rng.range(9, 15), leaf);
+  // Many small clumps rather than a few fat ones: the ragged edge is what
+  // separates a moor tree from a lollipop.
+  for (let i = 0; i < 15; i++) {
+    const cx = 44 + lean + rng.range(-24, 24), cy = 38 + rng.range(-22, 16);
+    ellipse(buf, cx, cy, rng.range(8, 15), rng.range(6, 11), leaf);
   }
   outline(buf, OUTLINE);
   return { canvas: bufToCanvas(buf), ox: 44, oy: 112 };
@@ -189,7 +306,7 @@ function propTree(rng) {
 
 function propRock(rng) {
   const buf = new Buf(44, 40);
-  const rm = ramp(COLORS.stone);
+  const rm = ramp('#565149');
   for (let i = 0; i < 4; i++) {
     ellipse(buf, 22 + rng.range(-8, 8), 28 + rng.range(-8, 4), rng.range(6, 12), rng.range(5, 9), rm);
   }
@@ -444,19 +561,17 @@ export const GROUND = {};
 export const WALLS = {};
 export const PROPS = {};
 
+// The variant is the tile's own window onto the seamless field, indexed by
+// where the tile lands on the screen lattice. Two tiles that touch pick
+// adjacent windows, so the texture continues across the join.
 export function getGround(terrain, wx, wy) {
   const set = GROUND[terrain] || GROUND.dirt;
-  // Cheap spatial hash so the variant is stable per tile without storing it.
-  let h = (wx * 374761393 + wy * 668265263) | 0;
-  h = (h ^ (h >>> 13)) * 1274126177 | 0;
-  return set[(h >>> 0) % set.length];
+  return set[(((wx - wy) & 7) << 3) | ((wx + wy) & 7)];
 }
 
 export function getWall(terrain, wx, wy) {
   const set = WALLS[terrain] || WALLS.cave;
-  let h = (wx * 2654435761 + wy * 40503) | 0;
-  h = (h ^ (h >>> 15)) * 2246822519 | 0;
-  return set[(h >>> 0) % set.length];
+  return set[(((wx - wy) & 7) << 3) | ((wx + wy) & 7)];
 }
 
 // How many times the generator below yields, so the loading bar does not have
@@ -467,14 +582,14 @@ export const TILE_BAKE_STEPS = Object.keys(TERRAIN).length * 2 + Object.keys(PRO
 export function* bakeTiles() {
   const rng = new Rng(20260728);
   const terrains = Object.keys(TERRAIN);
+  const fields = {};
   for (const t of terrains) {
-    GROUND[t] = [];
-    for (let i = 0; i < VARIANTS; i++) GROUND[t].push(bakeGroundVariant(t, rng.fork(t + i)));
+    fields[t] = bakeGroundField(t, rng.fork('field' + t));
+    GROUND[t] = bakeGroundSet(fields[t]);
     yield { label: 'ground ' + t };
   }
   for (const t of terrains) {
-    WALLS[t] = [];
-    for (let i = 0; i < 3; i++) WALLS[t].push(bakeWall(t, rng.fork('wall' + t + i)));
+    WALLS[t] = bakeWallSet(t, fields[t], rng.fork('wall' + t));
     yield { label: 'walls ' + t };
   }
   for (const name of Object.keys(PROP_BAKERS)) {

@@ -6,7 +6,7 @@
 // capsules, so a monster is a palette and a handful of proportions rather than
 // a drawing.
 
-import { Buf, capsule, ellipse, ellipseF, outline, tint, px } from './pixel.js';
+import { Buf, capsule, ellipse, ellipseF, groundFade, outline, tint, px } from './pixel.js';
 import { ramp, packHex, packRGB, COLORS } from './palette.js';
 
 export const CELL = 80;
@@ -38,15 +38,17 @@ const TAU = Math.PI * 2;
 
 // ---------------------------------------------------------------- proportions
 
-// Deliberately chunky. Realistic human proportions read as stick figures once
-// a character is only sixty pixels tall; roughly four heads to the body is what
-// makes pixel art legible at this size.
+// Proportioned after Diablo's pre-rendered figures: legs as long as the head
+// and torso together, a small head on wide shoulders, roughly five and a half
+// heads to the body. Straight realism would still read as a stick figure at
+// sixty pixels, so the mass lives in the shoulders and thighs rather than in
+// a big head.
 const DEFAULT_BUILD = {
-  thigh: 14, shin: 13, upperArm: 10, foreArm: 10,
-  hipU: 28, chestU: 43, neckU: 46, headU: 51, headR: 7,
-  shoulder: 10, hipSide: 5,
-  thighR: 4.0, shinR: 3.2, armR: 3.0, foreR: 2.5,
-  torsoR: 6.5, neckR: 3.0,
+  thigh: 17, shin: 16, upperArm: 10.5, foreArm: 10,
+  hipU: 33, chestU: 49, neckU: 52, headU: 57, headR: 5.4,
+  shoulder: 11, hipSide: 4.6,
+  thighR: 3.5, shinR: 2.8, armR: 2.7, foreR: 2.2,
+  torsoR: 6.1, neckR: 2.7,
   hunch: 0, stance: 1, headF: 0,
 };
 
@@ -282,14 +284,19 @@ function segments(spec, j, R, anim, t, a) {
       R.boot || R.cloth2 || R.cloth, dep(L.foot) - 0.3);
   }
 
-  // A robe covers the thighs and flares a little, but stops short of the boots
-  // so the walk cycle still reads.
+  // A robe is a flared skirt, not a tube: it stops at mid-shin and swells at
+  // the hem, so the legs still read below it and the waist stays narrow.
   if (P.robe) {
-    const hem = [j.pelvis[0] * 0.5, j.pelvis[1], (anim === 'death' ? 3 : 8) * S];
-    add('capsule', [j.chest, hem, b.torsoR * S * 0.95, b.torsoR * S * 1.3], R.cloth, dep(j.chest, hem) + 0.2);
+    const hem = [j.pelvis[0] * 0.5, j.pelvis[1], (anim === 'death' ? 3 : 13) * S];
+    add('capsule', [j.chest, hem, b.torsoR * S * 0.8, b.torsoR * S * 1.45], R.cloth, dep(j.chest, hem) + 0.2);
   }
 
-  add('capsule', [j.pelvis, j.chest, b.torsoR * S * 0.86, b.torsoR * S], R.cloth, dep(j.pelvis, j.chest));
+  // Narrow at the hip, wide at the chest: the V-taper is most of what makes
+  // the silhouette read as a warrior rather than a bottle.
+  add('capsule', [j.pelvis, j.chest, b.torsoR * S * 0.68, b.torsoR * S * 1.06], R.cloth, dep(j.pelvis, j.chest));
+  // A yoke across the shoulder joints. Without it the outline pass severs a
+  // wide-shouldered figure's arms from its chest whenever a gap opens.
+  add('capsule', [j.armL.sh, j.armR.sh, b.armR * S * 1.1, b.armR * S * 1.1], R.cloth, dep(j.chest) + 0.05);
 
   if (P.ribs) {
     for (let i = 0; i < 3; i++) {
@@ -308,7 +315,9 @@ function segments(spec, j, R, anim, t, a) {
 
   for (const side of ['armL', 'armR']) {
     const A = j[side];
-    add('capsule', [A.sh, A.elbow, b.armR * S, b.armR * S * 0.9], armRamp, dep(A.sh, A.elbow) + 0.1);
+    // Fat at the shoulder, tapering fast: the deltoid bulge carries the
+    // shoulder mass without another joint.
+    add('capsule', [A.sh, A.elbow, b.armR * S * 1.35, b.armR * S * 0.8], armRamp, dep(A.sh, A.elbow) + 0.1);
     add('capsule', [A.elbow, A.hand, b.foreR * S * 1.05, b.foreR * S * 0.85], P.bareArms ? R.skin : armRamp, dep(A.elbow, A.hand) + 0.2);
     add('ellipse', [A.hand, b.foreR * S * 1.05], R.skin, dep(A.hand) + 0.3);
   }
@@ -471,6 +480,9 @@ function bakeFrame(spec, anim, frame, dir, R) {
 
   outline(buf, OUTLINE);
   if (spec.tint) tint(buf, spec.tint[0], spec.tint[1]);
+  // Shade the ankles toward the ground so the figure sits on the tile instead
+  // of hovering over it; the renderer's blob shadow does the rest.
+  groundFade(buf, FOOT_Y - 10, 0.32);
   return buf;
 }
 
@@ -553,11 +565,11 @@ const humanoid = (over = {}) => ({
 // tiny person.
 const IMP_BUILD = {
   ...DEFAULT_BUILD,
-  thigh: 11, shin: 10, upperArm: 8.5, foreArm: 8.5,
-  hipU: 21, chestU: 33, neckU: 35, headU: 41, headR: 8.5,
-  shoulder: 9, hipSide: 4.5,
-  thighR: 3.6, shinR: 3.0, armR: 2.7, foreR: 2.3,
-  torsoR: 6.4, neckR: 2.8, hunch: 0.35,
+  thigh: 12, shin: 11, upperArm: 9, foreArm: 8.5,
+  hipU: 23, chestU: 35, neckU: 37, headU: 43, headR: 7.6,
+  shoulder: 9.5, hipSide: 4.4,
+  thighR: 3.2, shinR: 2.7, armR: 2.5, foreR: 2.1,
+  torsoR: 6.0, neckR: 2.6, hunch: 0.35,
 };
 
 export const FIGURE_SPECS = {
@@ -567,10 +579,10 @@ export const FIGURE_SPECS = {
       trim: COLORS.sorcTrim, hair: COLORS.sorcHair, metal: COLORS.steel,
       wood: COLORS.wood, gem: COLORS.arcane, cape: COLORS.sorcRobeAlt, boot: COLORS.leather,
     },
-    scale: 0.98,
+    scale: 0.94,
     parts: { robe: true, cape: true, hair: true, bareArms: true, belt: true },
     weapon: 'staff',
-    build: { ...DEFAULT_BUILD, shoulder: 9, torsoR: 6.0, headR: 6.6 },
+    build: { ...DEFAULT_BUILD, shoulder: 10, torsoR: 5.5, headR: 5.0 },
   }),
 
   barbarian: humanoid({
@@ -579,17 +591,17 @@ export const FIGURE_SPECS = {
       trim: COLORS.barbTrim, hair: COLORS.barbHair, metal: COLORS.steel,
       wood: COLORS.wood, boot: COLORS.leather,
     },
-    scale: 1.04,
+    scale: 1.02,
     parts: { hair: true, bareArms: true, belt: true },
     weapon: 'greataxe',
     attackStyle: 'twoHand',
     build: {
       ...DEFAULT_BUILD,
-      shoulder: 13, torsoR: 7.8, armR: 3.8, foreR: 3.2,
-      upperArm: 11, foreArm: 10.5,
-      chestU: 44, neckU: 47, headU: 52, headR: 6.8,
-      thighR: 4.6, shinR: 3.6, hipSide: 5.5,
-      hunch: -0.08, stance: 1.1,
+      shoulder: 14.5, torsoR: 7.6, armR: 3.6, foreR: 3.0,
+      upperArm: 11.5, foreArm: 10.5,
+      chestU: 46, neckU: 49, headU: 54, headR: 5.5,
+      thighR: 4.3, shinR: 3.3, hipSide: 5.6,
+      hunch: -0.08, stance: 1.12,
     },
   }),
 
@@ -631,7 +643,7 @@ export const FIGURE_SPECS = {
     parts: { horns: true, robe: true, hood: true, bareArms: true, fangs: true },
     weapon: 'staff',
     eyeColor: '#ff9a2a', eyeGlow: true,
-    build: { ...IMP_BUILD, hunch: 0.2, headR: 8.0 },
+    build: { ...IMP_BUILD, hunch: 0.2, headR: 7.1 },
   }),
 
   zombie: humanoid({
@@ -645,7 +657,7 @@ export const FIGURE_SPECS = {
     weapon: 'none',
     eyeColor: '#c8d84a', eyeGlow: true,
     anims: ['idle', 'walk', 'attack', 'death'],
-    build: { ...DEFAULT_BUILD, hunch: 0.42, torsoR: 6.2, shoulder: 9.5, headR: 7.2 },
+    build: { ...DEFAULT_BUILD, hunch: 0.42, torsoR: 6.0, shoulder: 10, headR: 5.6 },
   }),
 
   ghoul: humanoid({
@@ -659,7 +671,7 @@ export const FIGURE_SPECS = {
     weapon: 'none',
     eyeColor: '#ff4a4a', eyeGlow: true,
     anims: ['idle', 'walk', 'attack', 'death'],
-    build: { ...DEFAULT_BUILD, hunch: 0.52, torsoR: 5.4, thighR: 3.2, shinR: 2.6, armR: 2.4, foreR: 2.0, headR: 6.6 },
+    build: { ...DEFAULT_BUILD, hunch: 0.52, torsoR: 5.0, thighR: 3.0, shinR: 2.4, armR: 2.2, foreR: 1.8, headR: 5.2 },
   }),
 
   quillrat: humanoid({
@@ -691,7 +703,7 @@ export const FIGURE_SPECS = {
     weapon: 'sword',
     eyeColor: '#ff3a2a', eyeGlow: true,
     anims: ['idle', 'walk', 'attack', 'death'],
-    build: { ...DEFAULT_BUILD, torsoR: 5.0, thighR: 2.9, shinR: 2.4, armR: 2.2, foreR: 1.9, headR: 6.4 },
+    build: { ...DEFAULT_BUILD, torsoR: 4.6, thighR: 2.7, shinR: 2.2, armR: 2.0, foreR: 1.7, headR: 5.2 },
   }),
 
   corpsefire: humanoid({
@@ -705,7 +717,7 @@ export const FIGURE_SPECS = {
     weapon: 'club',
     eyeColor: '#ffee6a', eyeGlow: true,
     anims: ['idle', 'walk', 'attack', 'death'],
-    build: { ...IMP_BUILD, torsoR: 7.2, headR: 9.2, shoulder: 10.5 },
+    build: { ...IMP_BUILD, torsoR: 7.0, headR: 8.4, shoulder: 10.5 },
   }),
 
   bloodraven: humanoid({
@@ -718,14 +730,14 @@ export const FIGURE_SPECS = {
     parts: { cape: true, hair: true, hood: true, bareArms: true, belt: true },
     weapon: 'bow',
     eyeColor: '#ff2a2a', eyeGlow: true,
-    build: { ...DEFAULT_BUILD, torsoR: 6.0, shoulder: 9.5 },
+    build: { ...DEFAULT_BUILD, torsoR: 5.6, shoulder: 10.5 },
   }),
 
   // The encampment. Townsfolk only ever stand and breathe, so one animation is
   // all they cost.
   akara: humanoid({
     palette: {
-      skin: '#e0bd9c', cloth: '#d8cfae', cloth2: '#b3a683', trim: COLORS.gold,
+      skin: '#c9a684', cloth: '#d8cfae', cloth2: '#b3a683', trim: COLORS.gold,
       hair: '#cfc7bb', metal: COLORS.gold, wood: COLORS.wood, gem: COLORS.arcane,
       cape: '#c2b691', boot: COLORS.leather,
     },
@@ -733,12 +745,12 @@ export const FIGURE_SPECS = {
     parts: { robe: true, hood: true, cape: true, belt: true },
     weapon: 'staff',
     anims: ['idle'],
-    build: { ...DEFAULT_BUILD, torsoR: 6.4, headR: 6.5, hunch: 0.12 },
+    build: { ...DEFAULT_BUILD, torsoR: 6.0, headR: 5.2, hunch: 0.12 },
   }),
 
   charsi: humanoid({
     palette: {
-      skin: '#d9a173', cloth: '#6d4326', cloth2: '#4d3a2a', trim: '#8a6a3a',
+      skin: '#c08c60', cloth: '#6d4326', cloth2: '#4d3a2a', trim: '#8a6a3a',
       hair: '#3a2418', metal: COLORS.steel, wood: COLORS.wood, gem: COLORS.ember,
       boot: COLORS.leather,
     },
@@ -746,12 +758,12 @@ export const FIGURE_SPECS = {
     parts: { hair: true, bareArms: true, belt: true },
     weapon: 'club',
     anims: ['idle'],
-    build: { ...DEFAULT_BUILD, shoulder: 11, torsoR: 6.8, armR: 3.4, headR: 6.4 },
+    build: { ...DEFAULT_BUILD, shoulder: 12, torsoR: 6.6, armR: 3.2, headR: 5.2 },
   }),
 
   gheed: humanoid({
     palette: {
-      skin: '#c99a6a', cloth: '#5d2f6a', cloth2: '#7a4a2a', trim: COLORS.gold,
+      skin: '#b3875a', cloth: '#5d2f6a', cloth2: '#7a4a2a', trim: COLORS.gold,
       hair: '#241a14', metal: COLORS.gold, wood: COLORS.wood, gem: COLORS.gold,
       cape: '#4a2456', boot: COLORS.leather,
     },
@@ -759,12 +771,12 @@ export const FIGURE_SPECS = {
     parts: { robe: true, cape: true, hair: true, belt: true },
     weapon: 'none',
     anims: ['idle'],
-    build: { ...DEFAULT_BUILD, torsoR: 8.2, shoulder: 10, headR: 6.8, hunch: 0.2 },
+    build: { ...DEFAULT_BUILD, torsoR: 7.8, shoulder: 10.5, headR: 5.5, hunch: 0.2 },
   }),
 
   cain: humanoid({
     palette: {
-      skin: '#d8b294', cloth: '#4a4a52', cloth2: '#35353c', trim: '#8a7f6a',
+      skin: '#c09c7e', cloth: '#4a4a52', cloth2: '#35353c', trim: '#8a7f6a',
       hair: '#e2ded4', metal: COLORS.darkSteel, wood: COLORS.wood, gem: COLORS.arcane,
       cape: '#3d3d45', boot: COLORS.leather,
     },
@@ -772,7 +784,7 @@ export const FIGURE_SPECS = {
     parts: { robe: true, cape: true, hair: true, belt: true },
     weapon: 'staff',
     anims: ['idle'],
-    build: { ...DEFAULT_BUILD, torsoR: 5.6, shoulder: 8.4, headR: 6.4, hunch: 0.4 },
+    build: { ...DEFAULT_BUILD, torsoR: 5.2, shoulder: 9, headR: 5.2, hunch: 0.4 },
   }),
 
   kashya: humanoid({
@@ -785,7 +797,7 @@ export const FIGURE_SPECS = {
     parts: { cape: true, hair: true, bareArms: true, belt: true },
     weapon: 'bow',
     anims: ['idle'],
-    build: { ...DEFAULT_BUILD, shoulder: 9.4, torsoR: 6.0, headR: 6.4 },
+    build: { ...DEFAULT_BUILD, shoulder: 10.5, torsoR: 5.6, headR: 5.2 },
   }),
 
   warriv: humanoid({
@@ -798,7 +810,7 @@ export const FIGURE_SPECS = {
     parts: { robe: true, hood: true, cape: true, belt: true },
     weapon: 'none',
     anims: ['idle'],
-    build: { ...DEFAULT_BUILD, torsoR: 6.8, shoulder: 10, headR: 6.5 },
+    build: { ...DEFAULT_BUILD, torsoR: 6.4, shoulder: 11, headR: 5.3 },
   }),
 
   andariel: humanoid({
@@ -808,11 +820,13 @@ export const FIGURE_SPECS = {
       bone: COLORS.boneWhite, horn: '#e8d0b0', metal: COLORS.darkSteel,
       wood: COLORS.wood, trim: COLORS.poison, gem: COLORS.poison,
     },
-    scale: 1.12,
+    // Taller default build means 1.12 would poke through the cell roof on the
+    // idle bob; 1.08 keeps her the biggest thing in the room with margin.
+    scale: 1.08,
     parts: { spikes: true, hair: true, bareArms: true, bareLegs: true, fangs: true },
     weapon: 'none',
     eyeColor: '#9aff3a', eyeGlow: true,
-    build: { ...DEFAULT_BUILD, torsoR: 6.2, shoulder: 10.5, headR: 6.8, hunch: 0.1 },
+    build: { ...DEFAULT_BUILD, torsoR: 5.8, shoulder: 11.5, headR: 5.4, hunch: 0.1 },
   }),
 };
 

@@ -56,13 +56,22 @@ export function pxAdd(buf, x, y, c, strength = 1) {
   buf.data[i] = packRGB(r, g, b, a);
 }
 
-// Pick a ramp entry from a surface normal. Three bands is deliberately few:
-// more bands start to look like a gradient rather than pixel art.
-function shadeOf(rm, nx, ny, bias = 0) {
-  const s = nx * LIGHT_X + ny * LIGHT_Y + bias;
-  if (s > 0.34) return rm.light;
-  if (s < -0.28) return rm.dark;
-  return rm.base;
+// Pick a ramp entry from a surface normal. The 2D offset inside a capsule or
+// ellipse implies a sphere normal, so its z component is recovered and lit
+// too: centres of limbs catch light and rims fall into shadow, which is what
+// makes a shape read as round instead of flat. Five bands with a checkerboard
+// dither at every boundary softens the banding without ever averaging pixels,
+// so edges stay hard the way pixel art needs.
+function shadeOf(rm, nx, ny, bias = 0, x = 0, y = 0) {
+  const d2 = nx * nx + ny * ny;
+  const nz = d2 < 1 ? Math.sqrt(1 - d2) : 0;
+  let s = nx * LIGHT_X + ny * LIGHT_Y + nz * 0.30 + bias;
+  s += ((x ^ y) & 1) ? 0.055 : -0.055;
+  if (s > 0.80) return rm.hi || rm.light;
+  if (s > 0.33) return rm.light;
+  if (s > -0.26) return rm.base;
+  if (s > -0.64) return rm.dark;
+  return rm.deep || rm.dark;
 }
 
 export function rectF(buf, x, y, w, h, c) {
@@ -92,7 +101,7 @@ export function capsule(buf, x0, y0, r0, x1, y1, r1, rm, opts = {}) {
       const ox = x + 0.5 - px_, oy = y + 0.5 - py_;
       const d2 = ox * ox + oy * oy;
       if (d2 > r * r) continue;
-      px(buf, x, y, shadeOf(rm, ox / r, oy / r, bias));
+      px(buf, x, y, shadeOf(rm, ox / r, oy / r, bias, x, y));
     }
   }
 }
@@ -105,7 +114,7 @@ export function ellipse(buf, cx, cy, rx, ry, rm, opts = {}) {
     for (let x = minX; x <= maxX; x++) {
       const nx = (x + 0.5 - cx) / rx, ny = (y + 0.5 - cy) / ry;
       if (nx * nx + ny * ny > 1) continue;
-      px(buf, x, y, shadeOf(rm, nx, ny, bias));
+      px(buf, x, y, shadeOf(rm, nx, ny, bias, x, y));
     }
   }
 }

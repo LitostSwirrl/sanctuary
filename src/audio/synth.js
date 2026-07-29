@@ -212,13 +212,172 @@ export function sfx(name, opts = {}) {
   return true;
 }
 
+// ------------------------------------------------------------------- music
+//
+// Looping background music, composed at runtime from the same oscillator
+// primitives as the effects — no audio files, nothing stored. Three moods:
+// the camp gets quiet plucked arpeggios in A minor, the wilds an airy
+// wandering line above the drone, the dungeons a slow war drum under
+// dissonant fragments. A timer keeps ~1.5 s of notes scheduled ahead of the
+// clock, so a stalled frame never tears the music.
+
+let music = null;          // { mode, bus, bar, nextTime, timer }
+const LOOKAHEAD = 1.5;     // seconds of notes kept scheduled ahead
+const MUSIC_TICK = 300;    // ms between scheduler passes
+
+const semiF = (root, s) => root * Math.pow(2, s / 12);
+
+// One scheduled voice at an absolute time, routed through the music bus so a
+// mode change can fade everything it scheduled with one ramp.
+function mnote(bus, when, freq, o = {}) {
+  const osc = actx.createOscillator();
+  osc.type = o.type || 'triangle';
+  osc.frequency.value = freq;
+  const g = actx.createGain();
+  const dur = o.dur || 0.5;
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(o.gain ?? 0.08, when + (o.attack ?? 0.006));
+  g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+  let node = osc;
+  if (o.filter) {
+    const f = actx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = o.filter;
+    osc.connect(f); node = f;
+  }
+  node.connect(g); g.connect(bus);
+  osc.start(when);
+  osc.stop(when + dur + 0.05);
+}
+
+// A deep drum hit: filtered noise falling into the floor.
+function mthump(bus, when, o = {}) {
+  const src = actx.createBufferSource();
+  src.buffer = noiseBuffer;
+  const filt = actx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.setValueAtTime(o.f0 || 140, when);
+  filt.frequency.exponentialRampToValueAtTime(o.f1 || 45, when + (o.dur || 0.5));
+  filt.Q.value = 0.8;
+  const g = actx.createGain();
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(o.gain ?? 0.5, when + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + (o.dur || 0.5));
+  src.connect(filt); filt.connect(g); g.connect(bus);
+  src.start(when, rand(0, 0.6));
+  src.stop(when + (o.dur || 0.5) + 0.05);
+}
+
+// The camp. Eight bars of finger-picked arpeggios — Am F C G, Am F Dm E —
+// each note a semitone offset from A2, slightly humanized in time and touch,
+// with a soft bass root swelling under each bar.
+const TOWN_BARS = [
+  [0, 7, 12, 15, 19, 15, 12, 7],     // Am
+  [-4, 3, 8, 12, 15, 12, 8, 3],      // F
+  [3, 10, 15, 19, 22, 19, 15, 10],   // C, an added sixth on top
+  [-2, 5, 10, 14, 17, 14, 10, 5],    // G
+  [0, 7, 12, 15, 19, 15, 12, 7],     // Am
+  [-4, 3, 8, 12, 15, 12, 8, 3],      // F
+  [5, 8, 12, 17, 20, 17, 12, 8],     // Dm
+  [-5, 2, 7, 11, 14, 11, 7, 2],      // E, the pull home
+];
+
+function scheduleTown(bus, t, bar) {
+  const eighth = 60 / 84 / 2;
+  const semis = TOWN_BARS[bar % TOWN_BARS.length];
+  semis.forEach((s, i) => {
+    mnote(bus, t + i * eighth + rand(-0.006, 0.01), semiF(110, s),
+      { gain: 0.085 * rand(0.8, 1.15), dur: 0.55, filter: 1900 });
+  });
+  mnote(bus, t, semiF(55, semis[0]), { type: 'sine', gain: 0.05, dur: eighth * 8, attack: 0.4 });
+  return eighth * 8;
+}
+
+// The wilds. Mostly space: a few soft sine tones wandering a minor
+// pentatonic above the drone, a low pad every other bar, whole bars of rest.
+const FIELD_SET = [0, 3, 5, 7, 10, 12, 15];
+
+function scheduleField(bus, t, bar) {
+  const beat = 60 / 66;
+  if (bar % 2 === 0) {
+    mnote(bus, t, semiF(55, [0, 3, -2][(bar / 2) % 3]), { type: 'sine', gain: 0.04, dur: beat * 8, attack: 0.6 });
+  }
+  if (rand(0, 1) < 0.22) return beat * 4;
+  const n = 2 + Math.floor(rand(0, 3));
+  for (let i = 0; i < n; i++) {
+    mnote(bus, t + Math.floor(rand(0, 8)) * (beat / 2), semiF(220, FIELD_SET[Math.floor(rand(0, FIELD_SET.length))]),
+      { type: 'sine', gain: 0.055 * rand(0.7, 1.2), dur: rand(0.8, 1.6), attack: 0.05, filter: 2400 });
+  }
+  return beat * 4;
+}
+
+// The dungeons. A war drum on the bar, its echo uncertain; every other bar a
+// low sawtooth fragment leaning on minor seconds and the tritone; rarely, a
+// high shimmer that takes seconds to fade.
+const DARK_MOTIFS = [[0, 1, 0, -2], [3, 1, 0, 6], [0, 6, 5, 1], [12, 11, 6, 0]];
+
+function scheduleDungeon(bus, t, bar) {
+  const beat = 60 / 56;
+  mthump(bus, t, { gain: 0.5 });
+  if (rand(0, 1) < 0.5) mthump(bus, t + beat * 2.5, { gain: 0.28, f0: 110 });
+  if (bar % 2 === 0 && rand(0, 1) < 0.75) {
+    const motif = DARK_MOTIFS[Math.floor(rand(0, DARK_MOTIFS.length))];
+    motif.forEach((s, i) => {
+      mnote(bus, t + beat * (0.5 + i * 0.75), semiF(82.41, s),
+        { type: 'sawtooth', gain: 0.05, dur: beat * 0.9, filter: 620, attack: 0.03 });
+    });
+  }
+  if (rand(0, 1) < 0.12) {
+    for (let v = 0; v < 3; v++) {
+      mnote(bus, t + rand(0, beat), 1100 * (1 + (v - 1) * 0.025), { type: 'sine', gain: 0.02, dur: 2.6, attack: 0.8 });
+    }
+  }
+  return beat * 4;
+}
+
+const MUSIC_MODES = { town: scheduleTown, field: scheduleField, dungeon: scheduleDungeon };
+
+export function playMusic(mode) {
+  if (!actx) return;
+  if (music && music.mode === mode) return;
+  stopMusic();
+  if (!mode || muted || !MUSIC_MODES[mode]) return;
+  const bus = actx.createGain();
+  bus.gain.value = 1;
+  bus.connect(master);
+  const state = { mode, bus, bar: 0, nextTime: actx.currentTime + 0.15, timer: 0 };
+  const scheduler = MUSIC_MODES[mode];
+  const tick = () => {
+    while (state.nextTime < actx.currentTime + LOOKAHEAD) {
+      state.nextTime += scheduler(state.bus, state.nextTime, state.bar++);
+    }
+  };
+  state.timer = setInterval(tick, MUSIC_TICK);
+  music = state;
+  tick();
+}
+
+export function stopMusic() {
+  if (!music) return;
+  clearInterval(music.timer);
+  const bus = music.bus;
+  const t = actx.currentTime;
+  bus.gain.setValueAtTime(bus.gain.value, t);
+  bus.gain.linearRampToValueAtTime(0, t + 0.5);
+  setTimeout(() => { try { bus.disconnect(); } catch { /* already gone */ } }, 700);
+  music = null;
+}
+
+export function musicMode() { return music ? { mode: music.mode, bar: music.bar } : null; }
+
 // A slow drone under an area, so a dungeon feels different from a field.
 let ambientNodes = null;
 export function ambient(level) {
   if (!actx) return;
   stopAmbient();
-  if (!level || muted) return;
+  if (!level || muted) { stopMusic(); return; }
   const dark = (level.ambient[0] + level.ambient[1] + level.ambient[2]) / 3 < 60;
+  playMusic(level.townCentre ? 'town' : dark ? 'dungeon' : 'field');
   const base = dark ? 48 : 72;
   const nodes = [];
   for (let i = 0; i < 2; i++) {

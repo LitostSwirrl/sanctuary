@@ -89,7 +89,97 @@ export const UNIQUES = [
     mods: { manaPct: 40, skillCold: 1, coldMin: 4, coldMax: 10, fcr: 10 },
     flavour: 'The fingers ache in any weather.',
   },
+
+  // ---------------------------------------------------------- the chase tier
+  // The endgame names, kept to their signature mod shapes (per the Arreat
+  // Summit listings) with numbers cut down to this slice's level 30 world.
+  // Bases are the nearest this slice carries, same licence as Frostburn
+  // above. The try-out loadout in main.js equips these; the deepest floors
+  // can also drop the lower-gated ones.
+  {
+    name: 'The Oculus', base: 'smokedsphere', ilvl: 15,
+    mods: { skills: 3, fcr: 30, resAll: 20, mf: 50 },
+    flavour: 'It has seen every way this ends.',
+  },
+  {
+    name: 'Lidless Wall', base: 'kiteshield', ilvl: 14,
+    mods: { skills: 1, fcr: 20, ene: 10, manaPct: 10, mana: 30 },
+    flavour: 'It does not blink.',
+  },
+  {
+    name: 'Harlequin Crest', base: 'fullhelm', ilvl: 18,
+    mods: { skills: 2, life: 45, mana: 45, dr: 10, mf: 50 },
+    flavour: 'The jester wore it better.',
+  },
+  {
+    name: 'Skin of the Vipermagi', base: 'breastplate', ilvl: 12,
+    mods: { skills: 1, fcr: 30, resAll: 30, defPct: 120 },
+    flavour: 'Still shedding.',
+  },
+  {
+    name: 'Magefist', base: 'chaingloves', ilvl: 10,
+    mods: { skillFire: 1, fcr: 20, manaPct: 20, fireMin: 1, fireMax: 6 },
+    flavour: 'Warm palms, quick words.',
+  },
+  {
+    name: 'War Traveler', base: 'chainboots', ilvl: 14,
+    mods: { frw: 25, mf: 50, str: 10, vit: 10 },
+    flavour: 'They have walked farther than their owners.',
+  },
+  {
+    name: 'Arachnid Mesh', base: 'heavybelt', ilvl: 18,
+    mods: { skills: 1, fcr: 20, manaPct: 5, defPct: 100 },
+    flavour: 'Spun, not woven.',
+  },
+  {
+    name: 'Stone of Jordan', base: 'ring', ilvl: 15,
+    mods: { skills: 1, manaPct: 25, mana: 20, lightMin: 1, lightMax: 12 },
+    flavour: 'Worth more than the kingdom that minted it.',
+  },
+  {
+    name: "Mara's Kaleidoscope", base: 'amulet', ilvl: 16,
+    mods: { skills: 2, resAll: 25, str: 5, dex: 5, vit: 5, ene: 5 },
+    flavour: 'Every turn shows a kinder world.',
+  },
+  {
+    name: "Schaefer's Hammer", base: 'warhammer', ilvl: 18,
+    mods: { ed: 130, maxDmg: 55, lightMin: 40, lightMax: 110, ias: 20, resLight: 40 },
+    flavour: 'The storm broke against it.',
+  },
+  {
+    name: 'Stormshield', base: 'kiteshield', ilvl: 18,
+    mods: { dr: 12, str: 20, block: 25, resCold: 40, resLight: 25 },
+    flavour: 'Unmoved since the day it was hung.',
+  },
+  {
+    name: 'Shaftstop', base: 'breastplate', ilvl: 14,
+    mods: { defPct: 200, dr: 15, life: 60 },
+    flavour: 'The arrows gave up first.',
+  },
+  {
+    name: 'Steelrend', base: 'chaingloves', ilvl: 18,
+    mods: { ed: 45, str: 18, def: 60 },
+    flavour: 'Plate parts like cloth.',
+  },
+  {
+    name: 'String of Ears', base: 'heavybelt', ilvl: 14,
+    mods: { lifeSteal: 8, dr: 12, defPct: 160 },
+    flavour: 'Each one heard its last.',
+  },
+  {
+    name: "Bul-Kathos' Wedding Band", base: 'ring', ilvl: 15,
+    mods: { skills: 1, life: 40, lifeSteal: 5 },
+    flavour: 'The ancestors keep their vows.',
+  },
+  {
+    name: "Highlord's Wrath", base: 'amulet', ilvl: 16,
+    mods: { skills: 1, ias: 20, resLight: 35, lightMin: 1, lightMax: 30 },
+    flavour: 'It remembers the war in the clouds.',
+  },
 ];
+
+export const UNIQUE_BY_NAME = {};
+for (const u of UNIQUES) UNIQUE_BY_NAME[u.name] = u;
 
 export const UNIQUES_BY_BASE = {};
 for (const u of UNIQUES) {

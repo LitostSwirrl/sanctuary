@@ -48,6 +48,7 @@ export class UI {
     this.hitAreas = [];
     this.tooltip = null;
     this.vendorStock = null;
+    this.vendorScroll = 0;     // whole rows scrolled off the top of the shop list
     this.pickerSide = 'right'; // which mouse button the skill picker is binding
     this.npc = null;           // whoever is being spoken to
     this.npcSaid = null;       // the line currently on screen
@@ -57,7 +58,7 @@ export class UI {
 
   toggle(which) {
     this.open = this.open === which ? null : which;
-    if (this.open !== 'vendor') this.vendorStock = null;
+    if (this.open !== 'vendor') { this.vendorStock = null; this.vendorScroll = 0; }
     if (this.open !== 'talk' && this.open !== 'vendor' && this.open !== 'gamble') this.npc = null;
   }
   closeAll() { this.open = null; this.npc = null; }
@@ -448,25 +449,48 @@ export class UI {
     ctx.fillStyle = '#9a9078';
     ctx.fillText('Click to buy. Click an item in your bag to sell it.', x + 16 * s, y + 50 * s);
 
-    let ty = y + 66 * s;
+    // The list scrolls in whole rows (mouse wheel, fed from the main loop).
+    // Rows that would land under the button row are simply not drawn, so no
+    // clipping is needed and every visible row is fully clickable.
+    const rowH = 33 * s;
+    const listTop = y + 66 * s;
+    const listBot = y + h - (this.npc ? 56 : 16) * s;
+    const visibleRows = Math.max(1, Math.floor((listBot - listTop) / rowH));
+    const maxScroll = Math.max(0, stock.length - visibleRows);
+    this.vendorScroll = Math.max(0, Math.min(this.vendorScroll, maxScroll));
+
+    let ty = listTop - this.vendorScroll * rowH;
     for (const it of stock) {
-      const rect = { x: x + 14 * s, y: ty, w: w - 28 * s, h: 30 * s };
-      const hovered = this.hovering(rect, mx, my);
-      ctx.fillStyle = hovered ? 'rgba(90,78,44,0.5)' : 'rgba(0,0,0,0.35)';
-      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-      const ic = iconFor(it);
-      const sc = Math.min(26 * s / ic.width, 26 * s / ic.height);
-      ctx.drawImage(ic, rect.x + 3 * s, rect.y + (rect.h - ic.height * sc) / 2, ic.width * sc, ic.height * sc);
-      ctx.fillStyle = RARITY_COLOUR[it.rarity] || '#d6cdb4';
-      ctx.font = `${Math.round(12 * s)}px Georgia, serif`;
-      ctx.fillText(itemName(it).slice(0, 28), rect.x + 34 * s, rect.y + 19 * s);
-      ctx.fillStyle = player.gold >= it.price ? '#ffd24a' : '#a05a4a';
-      ctx.textAlign = 'right';
-      ctx.fillText(String(it.price), rect.x + rect.w - 6 * s, rect.y + 19 * s);
-      ctx.textAlign = 'left';
-      if (hovered && !this.drag) this.tooltip = describe(it, player);
-      this.area(rect, 'buy', it);
-      ty += 33 * s;
+      if (ty >= listTop && ty + 30 * s <= listBot) {
+        const rect = { x: x + 14 * s, y: ty, w: w - 28 * s, h: 30 * s };
+        const hovered = this.hovering(rect, mx, my);
+        ctx.fillStyle = hovered ? 'rgba(90,78,44,0.5)' : 'rgba(0,0,0,0.35)';
+        ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+        const ic = iconFor(it);
+        const sc = Math.min(26 * s / ic.width, 26 * s / ic.height);
+        ctx.drawImage(ic, rect.x + 3 * s, rect.y + (rect.h - ic.height * sc) / 2, ic.width * sc, ic.height * sc);
+        ctx.fillStyle = RARITY_COLOUR[it.rarity] || '#d6cdb4';
+        ctx.font = `${Math.round(12 * s)}px Georgia, serif`;
+        ctx.fillText(itemName(it).slice(0, 28), rect.x + 34 * s, rect.y + 19 * s);
+        ctx.fillStyle = player.gold >= it.price ? '#ffd24a' : '#a05a4a';
+        ctx.textAlign = 'right';
+        ctx.fillText(String(it.price), rect.x + rect.w - 6 * s, rect.y + 19 * s);
+        ctx.textAlign = 'left';
+        if (hovered && !this.drag) this.tooltip = describe(it, player);
+        this.area(rect, 'buy', it);
+      }
+      ty += rowH;
+    }
+
+    if (maxScroll > 0) {
+      const trackX = x + w - 9 * s;
+      const trackH = listBot - listTop;
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(trackX, listTop, 4 * s, trackH);
+      const thumbH = Math.max(18 * s, (visibleRows / stock.length) * trackH);
+      const thumbY = listTop + (this.vendorScroll / maxScroll) * (trackH - thumbH);
+      ctx.fillStyle = 'rgba(160,140,80,0.8)';
+      ctx.fillRect(trackX, thumbY, 4 * s, thumbH);
     }
 
     if (this.npc) {
@@ -835,6 +859,7 @@ export class UI {
     if (id === 'trade') {
       this.ensureStock(ctx.rng, ctx.level ? ctx.level.areaLevel : 1, npc);
       this.open = 'vendor';
+      this.vendorScroll = 0;
       return;
     }
 

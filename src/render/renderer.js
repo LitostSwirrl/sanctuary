@@ -183,7 +183,9 @@ export class Renderer {
     const cw = CELL * z;
 
     if (e.alive !== false || e.animName === 'death') {
-      this.drawShadow(ctx, cam, e.x, e.y, (e.radius || 0.32) * 1.25, e.alive === false ? 0.2 : 0.34);
+      // Tight and dark: a wide pale blob reads as a glow, a small hard pool
+      // under the feet reads as weight.
+      this.drawShadow(ctx, cam, e.x, e.y, (e.radius || 0.32) * 1.05, e.alive === false ? 0.22 : 0.46);
     }
 
     const ix = e.sheet.index(e.animName || 'idle', e.dir | 0, e.frame | 0);
@@ -275,7 +277,7 @@ export class Renderer {
 
     for (const s of level.lights) list.push(s);
     if (opts.player && opts.player.alive !== false) {
-      list.push({ x: opts.player.x, y: opts.player.y, r: opts.playerLightRadius || 11, cr: 255, cg: 232, cb: 200, i: 1, flicker: false });
+      list.push({ x: opts.player.x, y: opts.player.y, r: opts.playerLightRadius || 11, cr: 255, cg: 220, cb: 176, i: 1, flicker: false });
     }
     if (opts.fx) opts.fx.lights(list);
     if (opts.projectiles) opts.projectiles.lights(list);
@@ -297,14 +299,28 @@ export class Renderer {
       }
       const g = L.createRadialGradient(cx, cy, 0, cx, cy, rad);
       const cr = s.cr ?? 255, cg = s.cg ?? 220, cb = s.cb ?? 170;
+      // A hot core and a long dim tail: light pools read as torchlight
+      // pressed into darkness rather than a soft floodlamp.
       g.addColorStop(0, `rgba(${cr},${cg},${cb},${0.95 * inten})`);
-      g.addColorStop(0.45, `rgba(${cr},${cg},${cb},${0.42 * inten})`);
+      g.addColorStop(0.32, `rgba(${cr},${cg},${cb},${0.52 * inten})`);
+      g.addColorStop(0.7, `rgba(${cr},${cg},${cb},${0.16 * inten})`);
       g.addColorStop(1, 'rgba(0,0,0,0)');
       L.fillStyle = g;
       L.beginPath();
       L.arc(cx, cy, rad, 0, Math.PI * 2);
       L.fill();
     }
+
+    // Vignette, multiplied into the light buffer: whatever the lights do,
+    // the frame sinks toward its corners. Slightly blue so the darkness
+    // stays coloured instead of going to soot.
+    L.globalCompositeOperation = 'multiply';
+    const vg = L.createRadialGradient(w / 2, h * 0.46, Math.min(w, h) * 0.5, w / 2, h * 0.46, Math.hypot(w, h) * 0.62);
+    vg.addColorStop(0, 'rgb(255,255,255)');
+    vg.addColorStop(1, 'rgb(92,88,106)');
+    L.fillStyle = vg;
+    L.fillRect(0, 0, w, h);
+
     L.globalCompositeOperation = 'source-over';
     this.stats.lights = list.length;
   }

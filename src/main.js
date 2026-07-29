@@ -18,14 +18,15 @@ import { generate } from './world/gen.js';
 import { Renderer } from './render/renderer.js';
 import { drawMinimap } from './render/minimap.js';
 import { Player } from './game/player.js';
-import { applyDamage, applyChill, rollHit, rollDamage, monsterDefense, tickBurn, xpPenalty, xpForLevel } from './game/combat.js';
+import { applyDamage, applyChill, rollHit, rollDamage, monsterDefense, tickBurn, xpPenalty, xpForLevel, LEVEL_CAP } from './game/combat.js';
 import { populate, spawnBoss, Monster } from './game/monster.js';
 import { populateTown } from './game/npc.js';
 import { updateAI } from './game/ai.js';
 import { dropLoot, dropFromContainer, pickUp, addToInventory, groundItem, scatterWorldItems } from './game/loot.js';
 import { Projectiles } from './game/projectile.js';
-import { castSkill, allocate, refreshPassives, SKILL_BY_ID } from './game/skills.js';
-import { makeGold, rollItem } from './items/item.js';
+import { castSkill, allocate, refreshPassives, SKILL_BY_ID, SKILLS, CLASS_TREES } from './game/skills.js';
+import { makeGold, rollItem, forgeItem, makePotion } from './items/item.js';
+import { UNIQUE_BY_NAME } from './items/uniques.js';
 import { UI } from './ui/panels.js';
 import { drawHUD, drawGroundLabels, drawMonsterBanner, drawCursor, HUD_H } from './ui/hud.js';
 import { panel, panelTitle } from './ui/tooltip.js';
@@ -101,6 +102,24 @@ const game = {
   get now() { return Date.now(); },
 };
 
+// Part of the try-out boost below: the classic endgame loadout, every slot a
+// unique from the chase tier in items/uniques.js. Two characters never
+// coexist, so the classes sharing a Harlequin Crest or War Traveler is fine.
+const BEST_GEAR = {
+  sorceress: {
+    weapon: 'The Oculus', shield: 'Lidless Wall', head: 'Harlequin Crest',
+    body: 'Skin of the Vipermagi', gloves: 'Magefist', boots: 'War Traveler',
+    belt: 'Arachnid Mesh', ring1: 'Stone of Jordan', ring2: 'Stone of Jordan',
+    amulet: "Mara's Kaleidoscope",
+  },
+  barbarian: {
+    weapon: "Schaefer's Hammer", shield: 'Stormshield', head: 'Harlequin Crest',
+    body: 'Shaftstop', gloves: 'Steelrend', boots: 'War Traveler',
+    belt: 'String of Ears', ring1: "Bul-Kathos' Wedding Band", ring2: "Bul-Kathos' Wedding Band",
+    amulet: "Mara's Kaleidoscope",
+  },
+};
+
 function newGame(cls = 'sorceress') {
   seed = (Math.floor(Math.random() * 0x7fffffff)) >>> 0;
   rng = new Rng(seed);
@@ -122,6 +141,31 @@ function newGame(cls = 'sorceress') {
     player.leftSkill = 'attack';
   }
   player.gold = 80;
+
+  // Try-out boost: every new character starts fully maxed. Level cap through
+  // the normal xp path (so stat and skill points are granted as usual), every
+  // class skill hard-set to its 20-point cap, stat points spent evenly, and a
+  // purse deep enough to buy out any vendor. Delete this block to restore the
+  // level-1 start.
+  player.gainXp(xpForLevel(LEVEL_CAP));
+  for (const sk of SKILLS) {
+    if (CLASS_TREES[cls].includes(sk.tree)) player.skills[sk.id] = 20;
+  }
+  player.skillPoints = 0;
+  const statOrder = ['str', 'dex', 'vit', 'ene'];
+  for (let i = 0; player.statPoints > 0; i++) player.spendStat(statOrder[i % statOrder.length]);
+  // Money is no object, and every waypoint already knows this hero.
+  player.gold = 9999999;
+  for (const wp of WAYPOINT_AREAS) player.waypoints[wp] = true;
+  for (const slot in BEST_GEAR[cls]) {
+    const u = UNIQUE_BY_NAME[BEST_GEAR[cls][slot]];
+    player.equipment[slot] = forgeItem(u.base, u.name, u.mods, 30, { rarity: 'unique', flavour: u.flavour });
+  }
+  player.belt = [makePotion('hp3'), makePotion('hp3'), makePotion('mp3'), makePotion('mp3')];
+  // Fold the new gear into totals before refreshPassives reads them, so the
+  // masteries see the amulet's +skills exactly as they do on a loaded save.
+  player.recalc();
+
   refreshPassives(player);
   player.recalc(true);
   enterArea('town', null, true);
@@ -608,6 +652,9 @@ function step(dt) {
   const overHud = my > canvas.height - HUD_H * uiScale;
   const overPanel = ui.pointerOverPanel(mx, my, gctx);
 
+  // The wheel's only job is the shop list; drawVendor clamps the value.
+  if (ui.open === 'vendor' && Input.mouse.wheel) ui.vendorScroll += Input.mouse.wheel;
+
   if (Input.consumeL()) {
     if (ui.mouseDown(mx, my, player, gctx, 0)) {
       // a panel took it
@@ -832,7 +879,7 @@ function drawWon() {
 }
 
 function render() {
-  renderer.draw(level, cam, { player, fx, projectiles, time: clock, playerLightRadius: 12 });
+  renderer.draw(level, cam, { player, fx, projectiles, time: clock, playerLightRadius: 8.5 });
 }
 
 // The scene, then the cursor on top of everything. `drawFrame` reports what the
@@ -946,6 +993,7 @@ window.__continue = () => { continueGame(); return areaId; };
 window.__render = render;
 window.__step = step;
 window.__sheetFor = (figure) => assets.figures[figure];
+window.__audio = audio;
 window.__save = () => save(game);
 window.__clearSave = clearSave;
 window.__enter = (id) => { enterArea(id, null, true); return areaId; };

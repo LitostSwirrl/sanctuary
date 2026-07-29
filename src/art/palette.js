@@ -74,17 +74,23 @@ export function shift(hex, dL, dS = 0, dH = 0) {
   return packRGB(out.r, out.g, out.b);
 }
 
-// A shading ramp: lit face, base, shadow face, and the outline colour.
-// Shadows also get a small hue push toward blue, which is what stops generated
-// pixel art from looking like flat greyscale multiplication.
+// A shading ramp: highlight, lit face, base, shadow face, deep shadow, and the
+// outline colour. Five values instead of three because the shader dithers
+// between neighbouring bands: that is what turns a capsule from three flat
+// stripes into something that reads as a lit volume, the way Diablo's
+// pre-rendered sprites did. Shadows also get a small hue push toward blue,
+// which is what stops generated pixel art from looking like flat greyscale
+// multiplication.
 export function ramp(hex, opts = {}) {
   const lightAmt = opts.light ?? 0.13;
   const darkAmt = opts.dark ?? 0.13;
   const lineAmt = opts.line ?? 0.30;
   return {
+    hi: shift(hex, lightAmt * 1.9, (opts.lightSat ?? -0.05) - 0.05, opts.lightHue ?? 0.005),
     light: shift(hex, lightAmt, opts.lightSat ?? -0.05, opts.lightHue ?? 0.005),
     base: shift(hex, 0, 0, 0),
     dark: shift(hex, -darkAmt, 0.04, -0.012),
+    deep: shift(hex, -darkAmt * 1.85, 0.07, -0.02),
     line: shift(hex, -lineAmt, 0.06, -0.02),
   };
 }
@@ -93,7 +99,7 @@ export function ramp(hex, opts = {}) {
 export function flat(hex, alpha = 255) {
   const c = hexToRgb(hex);
   const p = packRGB(c.r, c.g, c.b, alpha);
-  return { light: p, base: p, dark: p, line: p };
+  return { hi: p, light: p, base: p, dark: p, deep: p, line: p };
 }
 
 export const TRANSPARENT = 0;
@@ -105,11 +111,11 @@ export const COLORS = {
   sorcRobe:    '#3b4b9c',
   sorcRobeAlt: '#5566c8',
   sorcTrim:    '#c8a94a',
-  sorcSkin:    '#e8b894',
+  sorcSkin:    '#cfa07a',
   sorcHair:    '#7a3a2a',
 
   // Barbarian
-  barbSkin:    '#d99a66',
+  barbSkin:    '#c4854f',
   barbHide:    '#7a4f2e',
   barbFur:     '#8a6a48',
   barbTrim:    '#a8843a',
@@ -136,8 +142,8 @@ export const COLORS = {
   // Bosses
   corpsefire:  '#a83a2a',
   ravenCloth:  '#5a1f2a',
-  ravenSkin:   '#c9a88a',
-  andarielSkin:'#c8b0a0',
+  ravenSkin:   '#b39377',
+  andarielSkin:'#b29a8a',
   andarielHair:'#2a1a24',
   andarielCarapace: '#6a2a3a',
 
