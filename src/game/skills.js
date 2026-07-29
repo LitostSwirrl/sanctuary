@@ -670,7 +670,6 @@ export const SKILLS = [
 export const SKILL_BY_ID = {};
 for (const s of SKILLS) SKILL_BY_ID[s.id] = s;
 
-export const TREES = ['fire', 'cold', 'light'];
 export const CLASS_TREES = {
   sorceress: ['fire', 'cold', 'light'],
   barbarian: ['cries', 'combat', 'mastery'],
