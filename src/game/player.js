@@ -116,7 +116,6 @@ export class Player extends Entity {
     if (this.ironSkinLevel > 0) def *= 1 + (30 + 10 * (this.ironSkinLevel - 1)) / 100;
     if (this.buffs.shout) def *= 1 + this.buffs.shout.mag / 100;
     this.defense = Math.floor(def);
-    this.attackRating = Math.floor(attackRatingFrom(dex, t.ar, this.level));
 
     for (const el of ['fire', 'cold', 'light', 'pois']) {
       const key = 'res' + el[0].toUpperCase() + el.slice(1);
@@ -129,11 +128,18 @@ export class Player extends Entity {
     this.runSpeed = 4.6 * (1 + t.frw / 200);
     this.speed = this.runSpeed;
 
-    // Weapon damage. Bare-handed is deliberately feeble: this is a caster.
+    // Weapon damage. Bare-handed is deliberately feeble: this is a caster —
+    // or it was; a mastery folds in for the matching weapon kind so the
+    // sheet stays honest.
+    const MASTERY_KIND = { axe: 'axe', mace: 'mace', sword: 'sword', blade: 'sword' };
     const wpn = this.equipment.weapon;
-    this.minDamage = (wpn ? wpn.minDmg : 1) + t.minDmg;
-    this.maxDamage = (wpn ? wpn.maxDmg : 2) + t.maxDmg;
+    const mk = wpn ? MASTERY_KIND[wpn.kind] : null;
+    const mp = mk ? (this.masteryPoints[mk] || 0) : 0;
+    const mBonus = mp > 0 ? 28 + 8 * (mp - 1) : 0;
+    this.minDamage = Math.floor(((wpn ? wpn.minDmg : 1) + t.minDmg) * (1 + mBonus / 100));
+    this.maxDamage = Math.floor(((wpn ? wpn.maxDmg : 2) + t.maxDmg) * (1 + mBonus / 100));
     this.attackSpeed = 1 + t.ias / 100;
+    this.attackRating = Math.floor(attackRatingFrom(dex, t.ar, this.level) + mBonus);
 
     // Raising vitality grants the new life immediately rather than only the
     // headroom, which is what the original does and what players expect.

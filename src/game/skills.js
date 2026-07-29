@@ -637,6 +637,28 @@ export const SKILLS = [
       if (ctx.sfx) ctx.sfx('explode');
     },
   },
+
+  // ------------------------------------------------------ BARBARIAN MASTERIES
+  {
+    id: 'axemastery', name: 'Axe Mastery', tree: 'mastery', req: 1, prereq: [], passive: true, iconSeed: 0,
+    blurb: 'Axes hit harder and truer in your hands.',
+    effect: (l) => `+${28 + 8 * (l - 1)}% Damage, +${28 + 8 * (l - 1)} Attack Rating with axes`,
+  },
+  {
+    id: 'macemastery', name: 'Mace Mastery', tree: 'mastery', req: 1, prereq: [], passive: true, iconSeed: 1,
+    blurb: 'Clubs, maces and hammers hit harder and truer in your hands.',
+    effect: (l) => `+${28 + 8 * (l - 1)}% Damage, +${28 + 8 * (l - 1)} Attack Rating with maces`,
+  },
+  {
+    id: 'swordmastery', name: 'Sword Mastery', tree: 'mastery', req: 6, prereq: [], passive: true, iconSeed: 2,
+    blurb: 'Blades of every length hit harder and truer in your hands.',
+    effect: (l) => `+${28 + 8 * (l - 1)}% Damage, +${28 + 8 * (l - 1)} Attack Rating with swords`,
+  },
+  {
+    id: 'ironskin', name: 'Iron Skin', tree: 'mastery', req: 12, prereq: [], passive: true, iconSeed: 3,
+    blurb: 'Skin like worked metal.',
+    effect: (l) => `+${30 + 10 * (l - 1)}% Defence`,
+  },
 ];
 
 export const SKILL_BY_ID = {};
@@ -676,11 +698,19 @@ export function allocate(player, id) {
   return true;
 }
 
-// Warmth is the only passive that feeds a value the player object reads
-// directly; the masteries are consumed at damage time.
+// Warmth feeds player.manaRegenBonus directly; the masteries feed
+// masteryPoints and ironSkinLevel the same way, which recalc folds into
+// the sheet.
 export function refreshPassives(player) {
   const w = skillLevel(player, 'warmth');
   player.manaRegenBonus = w > 0 ? SKILL_BY_ID.warmth.manaRegen(w) : 0;
+  player.masteryPoints = {
+    axe: skillLevel(player, 'axemastery'),
+    mace: skillLevel(player, 'macemastery'),
+    sword: skillLevel(player, 'swordmastery'),
+  };
+  player.ironSkinLevel = skillLevel(player, 'ironskin');
+  player.recalc();
 }
 
 export function manaCost(player, id) {
