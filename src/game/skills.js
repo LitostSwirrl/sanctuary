@@ -859,7 +859,9 @@ export const SKILLS = [
   {
     id: 'blizzard', name: 'Blizzard', tree: 'cold', req: 24, prereq: ['glacialspike'], element: 'cold', iconSeed: 5,
     mana: (l) => 22 + l * 0.5,
-    dps: (l) => 18 + 6 * (l - 1),
+    // Rated against Frozen Orb, the only cold skill near this tier: 11 a second
+    // over four seconds is 44 for 22.5 mana, which is what an Orb pays for.
+    dps: (l) => 11 + 4 * (l - 1),
     duration: (l) => 4 + 0.2 * (l - 1),
     synergies: [{ id: 'icebolt', pct: 4 }, { id: 'glacialspike', pct: 4 }],
     blurb: 'Weather, called down on one patch of ground and left to work.',
@@ -1097,7 +1099,9 @@ export const SKILLS = [
   {
     id: 'thunderstorm', name: 'Thunder Storm', tree: 'light', req: 24, prereq: ['chainlightning'], element: 'light', iconSeed: 5,
     mana: (l) => 20 + l * 0.5,
-    damage: (l) => ({ min: 6 + 3 * (l - 1), max: 14 + 5 * (l - 1) }),
+    // A strike is small because there are nine of them: nine sevens for 20.5
+    // mana is what Charged Bolt charges, and the cloud aims itself.
+    damage: (l) => ({ min: 4 + 2 * (l - 1), max: 10 + 4 * (l - 1) }),
     duration: (l) => 20 + (l - 1),
     synergies: [{ id: 'chainlightning', pct: 4 }],
     blurb: 'A cloud that follows you, and takes an interest in whoever is nearest.',
