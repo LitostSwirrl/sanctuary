@@ -294,13 +294,17 @@ export class UI {
     line('Poison Resist', `${player.resists.pois}%`, '#8fd88f');
     ty += 8 * s;
     if (player.cls === 'barbarian') line('Attack Speed', `${player.totals.ias}%`);
-    // Frenzy is the one thing on this sheet that changes while you read it, so
-    // it gets its own row: how many stacks are alive and what they add.
-    if (player.buffs.frenzy) {
-      const n = stackCount(player, 'frenzy');
-      line('Frenzy', `${n} of ${player.buffs.frenzy.stacks.max}  (+${n * player.buffs.frenzy.ias}% Attack Speed)`, '#ff8a5a');
-    }
     else line('Faster Cast Rate', `${player.castRate}%`);
+    // Frenzy is the one thing on this sheet that changes while you read it, so
+    // it gets its own row — and only while a stack is actually alive. The buff
+    // window is refreshed by every blow and outlives the stacks inside it, so a
+    // row still reading "0 of 5" would be claiming a swing speed the hero lost
+    // seconds ago. Its own statement, too: this row is not the class fork above.
+    const frenzyStacks = stackCount(player, 'frenzy');
+    if (frenzyStacks > 0) {
+      const b = player.buffs.frenzy;
+      line('Frenzy', `${frenzyStacks} of ${b.stacks.max}  (+${frenzyStacks * b.ias}% Attack Speed)`, '#ff8a5a');
+    }
     line('Faster Run/Walk', `${player.totals.frw}%`);
     line('Magic Find', `${player.magicFind}%`);
     line('Gold Find', `${player.goldFind}%`);

@@ -1774,27 +1774,41 @@ export function allocate(player, id) {
   return true;
 }
 
+// The level a passive is cached at: allocated points plus whatever the gear
+// grants, and deliberately not what a buff grants. These numbers are written
+// once per allocation and per gear change and then simply sit on the player, so
+// a buff that reached them would be banked the moment anything called
+// refreshPassives and could never be taken back when the buff lapsed — Battle
+// Command's +1 in particular. It has no business here: it moves live
+// skillLevel reads, which is exactly what its tooltip promises.
+function passiveLevel(player, id) {
+  const base = allocatedPoints(player, id);
+  if (base <= 0) return 0;
+  const sk = SKILL_BY_ID[id];
+  return base + player.skillBonus(sk ? sk.tree : null);
+}
+
 // Warmth feeds player.manaRegenBonus directly; the masteries feed
 // masteryPoints and ironSkinLevel the same way, which recalc folds into
 // the sheet. The three Barbarian passives that are not about a weapon hand
-// recalc the finished percentage rather than their level, so the number the
+// cache the finished percentage rather than their level, so the number the
 // tooltip prints and the number the sheet uses come from the same line.
 function pctOf(player, id, field) {
-  const lvl = skillLevel(player, id);
+  const lvl = passiveLevel(player, id);
   return lvl > 0 ? SKILL_BY_ID[id][field](lvl) : 0;
 }
 
 export function refreshPassives(player) {
-  const w = skillLevel(player, 'warmth');
+  const w = passiveLevel(player, 'warmth');
   player.manaRegenBonus = w > 0 ? SKILL_BY_ID.warmth.manaRegen(w) : 0;
   player.masteryPoints = {
-    axe: skillLevel(player, 'axemastery'),
-    mace: skillLevel(player, 'macemastery'),
-    sword: skillLevel(player, 'swordmastery'),
-    polearm: skillLevel(player, 'polearmmastery'),
-    spear: skillLevel(player, 'spearmastery'),
+    axe: passiveLevel(player, 'axemastery'),
+    mace: passiveLevel(player, 'macemastery'),
+    sword: passiveLevel(player, 'swordmastery'),
+    polearm: passiveLevel(player, 'polearmmastery'),
+    spear: passiveLevel(player, 'spearmastery'),
   };
-  player.ironSkinLevel = skillLevel(player, 'ironskin');
+  player.ironSkinLevel = passiveLevel(player, 'ironskin');
   player.lifeBonusPct = pctOf(player, 'increasedstamina', 'lifePct');
   player.runSpeedBonusPct = pctOf(player, 'increasedspeed', 'runPct');
   player.resistBonus = pctOf(player, 'naturalresistance', 'resAll');
@@ -1824,7 +1838,12 @@ export function castSkill(player, id, tx, ty, ctx) {
 export function describeSkill(player, id) {
   const sk = SKILL_BY_ID[id];
   const alloc = allocatedPoints(player, id);
-  const lvl = Math.max(1, skillLevel(player, id));
+  // A passive is read at the level it is cached at, because that is the level
+  // the sheet is actually using: a buff granting +1 to skills moves what you
+  // cast, not what has already been folded into your defence and your damage.
+  // Printing the buffed number here would promise a percentage the sheet does
+  // not deliver.
+  const lvl = Math.max(1, sk.passive ? passiveLevel(player, id) : skillLevel(player, id));
   const lines = [];
   lines.push({ text: sk.name, colour: '#ffe08a', header: true });
   lines.push({ text: sk.passive ? 'Passive' : `${TREE_NAME[sk.tree]} Skill`, colour: '#9a9078' });
