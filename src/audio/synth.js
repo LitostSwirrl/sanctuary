@@ -626,7 +626,7 @@ function partCheck(key, part, o) {
 // --------------------------------------------------------- mini-notation
 //
 // A bar of music, written as a string. The shape is Tidal's and Strudel's;
-// the parser is ours — sixty lines, no dependency, nothing fetched, nothing
+// the parser is ours — eighty lines, no dependency, nothing fetched, nothing
 // installed. Four things and no more:
 //
 //   "0 3 5 ~"      whitespace splits the bar into even slots; `~` is a rest
@@ -776,12 +776,15 @@ const DARK_MOTIFS = [
 // Lut Gholein, in D phrygian dominant — D Eb F# G A Bb C, the flat second and
 // the augmented step above it being the whole reason the mode is here. The
 // oud figure keeps that Eb away from its neighbours: it is always left by a
-// third or across a rest, never leant on.
+// third or across a rest, never leant on — and it appears only in bar 3,
+// where the bass is holding D underneath it and the flat second is the
+// cadence the mode is named for. Bar 4's bass holds A, against which the
+// same Eb would be a tritone, so bar 4 rises to the octave instead.
 const OUD_FIGURE = [
   '0 ~ [4 5] 7 ~ 5 4 ~',
   '5 ~ [7 8] 10 ~ 8 7 ~',
   '[0 4] 5 7 [8 7] 5 4 1 ~',
-  '4 1 ~ 0 ~ [7 5] 4 ~',
+  '4 12 ~ 0 ~ [7 5] 4 ~',
 ];
 
 // Kurast, bright and quick an octave above the other towns — high enough that
@@ -991,30 +994,34 @@ export const MOODS = {
   // ------------------------------------------------------------------ Act 4
   // Pandemonium. Nobody built this camp and nobody is glad to be in it: no
   // drum, no colour, no warmth. A pad thin and high enough to be air rather
-  // than a chord, one bell, then two bars of nothing.
+  // than a chord, one bell, then two bars of nothing. Quietest of the five
+  // camps on the meter as well as the emptiest: a distant bell that measured
+  // louder than Lut Gholein's whole market was telling the wrong story.
   'a4.town': {
     tempo: 56, beats: 4, root: 220,
     bars: [0, 7],
     figure: PANDEMONIUM_FIGURE,
     voices: {
-      lead: { kind: 'bell', gain: 0.1, dur: 3.2 },
-      bass: { kind: 'pad', root: 220, gain: 0.03, attack: 1.8, filter: 1500, detune: 0.004, every: 2, hold: 2 },
-      wind: { gain: 0.022 },
+      lead: { kind: 'bell', gain: 0.075, dur: 3.2 },
+      bass: { kind: 'pad', root: 220, gain: 0.022, attack: 1.8, filter: 1500, detune: 0.004, every: 2, hold: 2 },
+      wind: { gain: 0.018 },
     },
   },
-  // The plains of despair. Five beats to the bar, and a drum that falls 3-3-2
-  // across eight slots of it, so the stride never resolves. One note a bar and
-  // half the bars empty — the sparsest thing in the score. The pad's detune is
-  // wide enough to beat against itself, which is where the sourness comes from;
+  // The plains of despair. Five beats to the bar, and two drum strokes across
+  // eight slots of it — five slots apart, then three — so the stride never
+  // resolves and never repeats evenly. One note a bar and three bars in five
+  // empty: the sparsest thing in the score, and it has to stay strictly the
+  // sparsest, which is why the drum lost a stroke. The pad's detune is wide
+  // enough to beat against itself, which is where the sourness comes from;
   // nothing here is written as a clash.
   'a4.field': {
     tempo: 54, beats: 5, root: 130.81,
     bars: [0, 8, 3],
-    scale: [0, 3, 7, 10, 12], density: 1, rest: 0.5,
+    scale: [0, 3, 7, 10, 12], density: 1, rest: 0.6,
     voices: {
       lead: { kind: 'pluck', gain: 0.12, dur: [1.2, 2.2], brightness: 1500 },
       bass: { kind: 'pad', root: 65.41, gain: 0.042, attack: 2, filter: 460, detune: 0.02, every: 2, hold: 2 },
-      perc: [{ kind: 'drum', pattern: 'x ~ ~ x ~ ~ x ~', gain: 0.42, f0: 110, f1: 38, dur: 0.9, chance: 0.8 }],
+      perc: [{ kind: 'drum', pattern: 'x ~ ~ ~ ~ x ~ ~', gain: 0.42, f0: 110, f1: 38, dur: 0.9, chance: 0.8 }],
       wind: { gain: 0.03 },
     },
   },
@@ -1320,15 +1327,27 @@ export function mode() { return music ? music.key : null; }
 // into the speakers. No running context, no user gesture, no wall clock — the
 // same scheduleBar the live pump calls, against an offline context that renders
 // as fast as it can. 22050 Hz mono is plenty to measure level and balance.
-export function renderMood(key, seconds = 8) {
+//
+// `scheduleUntil` stops the scheduling short of the render, which is how the
+// drone regression is asked now. The first version of that test averaged the
+// signal over a long window and called a high mean a hum, but a hum oscillates
+// and averages to nothing: the review rebuilt the drone this task killed and it
+// passed by a factor of a hundred. What actually separates a drone from music
+// is not a spectrum but a behaviour — every voice here is started and stopped
+// at written times, and a drone is a node nobody ever stops. So schedule bars
+// into the first part of the render only and measure the end: whatever is still
+// sounding there was never given a stop time.
+export function renderMood(key, seconds = 8, o = {}) {
   if (!MOODS[key]) return Promise.reject(new Error(`unknown mood: ${key}`));
   const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   const octx = new OAC(1, Math.ceil(22050 * seconds), 22050);
   const obus = octx.createGain();
   obus.gain.value = MASTER * MUSIC_LEVEL;    // what the live bus and master would apply
   obus.connect(octx.destination);
+  const until = Number.isFinite(o.scheduleUntil) && o.scheduleUntil > 0
+    ? Math.min(o.scheduleUntil, seconds) : seconds;
   let t = 0;
-  for (let bar = 0; t < seconds; bar++) t += scheduleBar(octx, obus, key, bar, t);
+  for (let bar = 0; t < until; bar++) t += scheduleBar(octx, obus, key, bar, t);
   return octx.startRendering();
 }
 
