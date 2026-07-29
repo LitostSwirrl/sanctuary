@@ -611,8 +611,14 @@ export const SKILLS = [
     blurb: 'The order to stand. Life and mana swell to meet it.',
     effect: (l) => `+${30 + 3 * (l - 1)}% Maximum Life and Mana for ${30 + 6 * (l - 1)}s`,
     cast(caster, lvl, tx, ty, ctx) {
+      // Orbs and sheet max life/mana rise, but current values keep their
+      // absolute numbers — recalc's non-fill grant branch would otherwise
+      // hand over the max-delta as a free heal/mana top-up on every cast.
+      const prevHp = caster.hp, prevMana = caster.mana;
       caster.buffs.battleorders = { t: 30 + 6 * (lvl - 1), mag: 30 + 3 * (lvl - 1) };
       caster.recalc();
+      caster.hp = Math.min(prevHp, caster.maxHp);
+      caster.mana = Math.min(prevMana, caster.maxMana);
       ctx.fx.ring(caster.x, caster.y, { maxR: 2.6, cr: 240, cg: 200, cb: 120, life: 0.4, w: 3, lit: 1.4 });
     },
   },
