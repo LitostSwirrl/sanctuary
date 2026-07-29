@@ -13,7 +13,7 @@
 - **Task 4 — Melee skill path + Combat strikes**: done (2026-07-29, commit 7cf6975)
 - **Task 5 — Leap and Whirlwind**: done (2026-07-29, commit 47df38b)
 - **Task 6 — Monster status + Warcries**: done (2026-07-29, commit 8b8fb6b)
-- **Task 7 — Masteries**: pending
+- **Task 7 — Masteries**: done (2026-07-29, commit e202576)
 - **Task 8 — Verification contract (ship gate)**: pending
 - **Task 9 — Nightmare (STRETCH, only after Task 8 green)**: pending
 
@@ -91,6 +91,14 @@ Execution mode: **subagent-driven** (decided 2026-07-29). First execution resume
 **Why**: This is the class's support half and the monster-status layer the whole kit stands on. Observed live: Howl routs and Corpsefire stands, Shout doubles defence for its printed window, Battle Orders raises max and clamps on expiry, War Cry damages and freezes, buffs die on reload, Sorceress regression green. One check ruled resolved-by-mechanism: Battle Cry's "hits land more often" is unobservable at the 95% to-hit cap; the defence halving was proven exact through the real to-hit path (ledger has the full ruling).
 
 **Next**: Task 7 (Masteries — four passives, refreshPassives, recalc weapon-kind fold).
+
+### Task 7 — Masteries (2026-07-29)
+
+**What**: Axe/Mace/Sword Mastery and Iron Skin appended after `warcry` (all `passive: true`, no cast/mana), `refreshPassives` grown to write `masteryPoints`/`ironSkinLevel` (Warmth precedent — no skills import in player.js), and the recalc weapon fold: `MASTERY_KIND` (blade maps to sword), multiplicative damage, additive attack rating, with the attackRating line moved below the weapon block — commit `e202576`, exactly skills.js + player.js. Review Approved, spec PASS: reorder traced statement-by-statement (nothing reads attackRating in between), formulas re-derived independently (AR 67 to 95 to 67 to 95 across allocation and weapon swaps; Iron Skin + Shout stack proven multiplicative, 13 vs the additive 11).
+
+**Why**: Masteries make the character sheet honest — the bonus appears only while the matching weapon kind is held, and the last inert Task 2 fields now carry real values. Bonus find: the implementer root-caused the pre-existing vendor crash (buy handler reads `this.vendorStock`; named-NPC stock lives on `npc.stock`; the purchase completes before the throw) — on the ledger for Task 8/final triage, untouched here.
+
+**Next**: Task 8 (the verification contract — ship gate; 450ms cold-bake adjudication lives there).
 
 ---
 
