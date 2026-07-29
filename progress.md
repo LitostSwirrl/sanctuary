@@ -290,3 +290,20 @@ Phase log (What/Why/Next per phase):
   Why: the spec is the contract -- 60 exact skills, 35 exact areas, 15 music moods, budgets
   and a seven-point ship gate -- so implementation can fan out to workers without drift.
   Next: Phase 2, the music rewrite.
+- **Phase 2, the music rewrite (done, 2026-07-29)**: the hum is dead and the score is real.
+  What: the `ambient()` drone deleted; five voice primitives (a Karplus-Strong pluck that is
+  pitch-true to ~2 cents at any register, pad, bell, shaker, bounded wind); one data-driven
+  bar scheduler behind `scheduleBar`; fifteen per-act moods written in a Tidal-style
+  mini-notation parsed by ~80 lines of our own; an offline `renderMood` harness whose drone
+  check is behavioural (schedule stops at 6 s, the tail of a 20 s render must be silent) and
+  demonstrably bites -- the old drone rebuilt as a control fails it by 529x while all fifteen
+  moods measure bit-exact zero. Why it took five fix rounds on Task 1: Chrome adds a render
+  quantum inside feedback loops (every pluck was flat), lowpass Q is denominated in decibels
+  (the loop ran away), and the review chain kept refusing to let a guard sit at the wrong
+  layer -- the mood-table surface is now poison-proof (60+ malformed cases degrade to a
+  diagnosed part-silence, never a frozen scheduler). Commits `053091e..0e6fa0a`,
+  `4ef926a`, `780e60b`, `46ace45`; bundle 437 KB.
+  Not machine-verifiable: whether it sounds good. `__audio.playMusic(key)` with keys
+  `a1`-`a5` x `.town/.field/.dungeon`; the +5 dB score presence is one constant
+  (`MUSIC_LEVEL`, synth.js) if it sits too loud in the mix.
+  Next: Phase 3, both classes to their canon thirty (plan Tasks 3-6).
