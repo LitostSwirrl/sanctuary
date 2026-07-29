@@ -27,7 +27,7 @@ import { Projectiles } from './game/projectile.js';
 import {
   castSkill, allocate, refreshPassives, SKILL_BY_ID, SKILLS, CLASS_TREES,
   tickHazards, tickPets, tickBuffs, nearestCorpse,
-  addHazard, addPet, beam, addStack, stackCount, consumeCorpse,
+  addHazard, addPet, beam, addStack, stackCount, consumeCorpse, enchantFire,
 } from './game/skills.js';
 import { makeGold, rollItem, forgeItem, makePotion } from './items/item.js';
 import { UNIQUE_BY_NAME } from './items/uniques.js';
@@ -433,7 +433,11 @@ function playerAttack(target) {
         return;
       }
       const raw = rollDamage(rng, player.minDamage, player.maxDamage, player.totals.ed, player.effective.str);
-      gctx.damageMonster(target, { phys: raw }, { source: player });
+      // Enchant is fire laid on the weapon, so it rides the plain swing too.
+      const dmg = { phys: raw };
+      const fire = enchantFire(player, rng);
+      if (fire > 0) dmg.fire = fire;
+      gctx.damageMonster(target, dmg, { source: player });
     },
     onEnd: () => player.setAnim('idle'),
   });

@@ -1,6 +1,6 @@
 // The Sorceress skill trees.
 //
-// Fourteen skills across three trees with real synergies: points in Fire Bolt
+// Thirty skills across three trees with real synergies: points in Fire Bolt
 // raise Fire Ball's damage, exactly as in the original. Synergies read hard
 // allocated points only, while damage scaling reads the effective level
 // including bonuses from equipment — that split is what stops a +3 skills
@@ -10,7 +10,7 @@
 //   { level, player, fx, rng, projectiles, time, sfx,
 //     damageMonster(monster, dmgObject, opts) }
 
-import { rollHit, rollDamage, monsterDefense } from './combat.js';
+import { rollHit, rollDamage, monsterDefense, applyFreeze } from './combat.js';
 import { FX } from '../art/fx.js';
 
 const TAU = Math.PI * 2;
@@ -77,6 +77,20 @@ export function skillDamage(player, id) {
   return { min: Math.round(d.min * m), max: Math.round(d.max * m), element: sk.element };
 }
 
+// What a burning or freezing patch of ground does every second. The hazard
+// takes a single number rather than a range, so this is the one place it is
+// worked out — the tooltip prints this and the cast hands the same value to
+// the hazard, which is the only way the printed rate can be the measured one.
+function dpsFor(player, sk, lvl) {
+  return Math.round(sk.dps(lvl) * damageMult(player, sk));
+}
+
+export function skillDps(player, id) {
+  const sk = SKILL_BY_ID[id];
+  if (!sk || !sk.dps) return 0;
+  return dpsFor(player, sk, Math.max(1, skillLevel(player, id)));
+}
+
 function rollFor(ctx, player, sk, lvl) {
   const d = sk.damage(lvl);
   const m = damageMult(player, sk);
@@ -93,6 +107,48 @@ function damageArea(ctx, x, y, radius, roll, element, opts = {}) {
     hits++;
   }
   return hits;
+}
+
+// Everything inside the cone takes one roll: `spread` is the half-angle off
+// the aim, and anything close enough to touch counts as inside it however it
+// is standing — Inferno should never miss the thing in your face.
+function damageCone(ctx, caster, tx, ty, range, spread, roll, element, opts = {}) {
+  const a = aimVector(caster, tx, ty, 1);
+  const cos = Math.cos(spread);
+  let hits = 0;
+  for (const e of ctx.level.entities) {
+    if (!e.alive || e.isPlayer || e.isNpc) continue;
+    const dx = e.x - caster.x, dy = e.y - caster.y;
+    const d = Math.hypot(dx, dy);
+    if (d > range + e.radius) continue;
+    if (d > 0.8 && (dx * a.dx + dy * a.dy) / d < cos) continue;
+    ctx.damageMonster(e, { [element]: roll() }, opts);
+    hits++;
+  }
+  return hits;
+}
+
+// The monster the click meant, if one is standing close enough to the point
+// clicked to have been meant at all.
+function targetNear(ctx, tx, ty, range = 1.4) {
+  let best = null, bd = range;
+  for (const e of ctx.level.entities) {
+    if (!e.alive || e.isPlayer || e.isNpc) continue;
+    const d = Math.hypot(e.x - tx, e.y - ty);
+    if (d < bd) { bd = d; best = e; }
+  }
+  return best;
+}
+
+// One of the things nearby, chosen at random rather than nearest: Thunder
+// Storm should read as weather, not as a turret locked on the closest thing.
+function randomNear(ctx, x, y, range) {
+  const near = [];
+  for (const e of ctx.level.entities) {
+    if (!e.alive || e.isPlayer || e.isNpc) continue;
+    if (Math.hypot(e.x - x, e.y - y) <= range + e.radius) near.push(e);
+  }
+  return near.length ? near[ctx.rng.i(near.length)] : null;
 }
 
 function aimVector(caster, tx, ty, speed) {
@@ -189,6 +245,17 @@ export function addHazard(level, o) {
     t: 0, fxT: 0,
   };
   level.hazards.push(h);
+  return h;
+}
+
+// Ground laid by a skill that printed a rate on its tooltip. A hazard's first
+// bite is otherwise due a whole tick after it lands, so a short patch would
+// deal one bite less than the rate it advertises — measured at 900 a second
+// where the tooltip said 1125. Charging the accumulator makes the fire bite on
+// arrival, and a full lifetime then delivers exactly what was promised.
+function layHazard(level, o) {
+  const h = addHazard(level, o);
+  h.t = h.tick;
   return h;
 }
 
@@ -364,6 +431,26 @@ export function stackCount(player, id) {
   return b && b.stackAt ? b.stackAt.length : 0;
 }
 
+// The three cold armours are one garment: putting one on takes the others off,
+// as in the original. `recalc` runs because the defence they grant is read off
+// the buff.
+const COLD_ARMOURS = ['frozenarmor', 'shiverarmor', 'chillingarmor'];
+
+function wearArmour(caster, id, buff) {
+  for (const a of COLD_ARMOURS) delete caster.buffs[a];
+  caster.buffs[id] = buff;
+  caster.recalc();
+}
+
+// Enchant rides on the plain swing, which the main loop resolves rather than
+// this file — this is what it adds, rolled from the numbers the buff took down
+// at cast time. Enchant snapshots: gear swapped afterwards changes nothing.
+export function enchantFire(player, rng) {
+  const b = player.buffs.enchant;
+  if (!b) return 0;
+  return b.min + rng.f() * (b.max - b.min);
+}
+
 // ------------------------------------------------------------------- corpses
 
 // Corpses are simply the dead still lying in `level.entities` — the same bodies
@@ -389,10 +476,28 @@ export function consumeCorpse(ctx, c) {
 
 // ------------------------------------------------------------------- skills
 
+// Shapes the tooltips print and the casts use. A promise and the behaviour
+// behind it read from the same constant, so they cannot drift apart.
+const INFERNO_RANGE = 5.5, INFERNO_SPREAD = 0.42;
+const BLAZE_EVERY = 0.5, BLAZE_LIFE = 2, BLAZE_R = 0.9;
+const WALL_SEGMENTS = 3, WALL_GAP = 2.4, WALL_R = 1.2;
+const WALL_LEN = (WALL_SEGMENTS - 1) * WALL_GAP + WALL_R * 2;
+const HYDRA_RATE = 1;
+const SPIKE_R = 2.4;
+const BLIZZARD_R = 3;
+const TK_REACH = 8, TK_PUSH = 1.2;
+const BOLT_RANGE = 12, BOLT_WIDTH = 0.7;
+const STORM_EVERY = 2, STORM_RANGE = 9;
+// How often a patch of ground bites. Damage is quoted per second, and the
+// hazard carries the overshoot, so the rate holds whatever the frame rate does.
+// Every duration in this file is a multiple of it, which is what makes a full
+// lifetime deliver the printed rate exactly rather than to the nearest bite.
+const HAZARD_TICK = 0.2;
+
 export const SKILLS = [
   // ------------------------------------------------------------------- FIRE
   {
-    id: 'firebolt', name: 'Fire Bolt', tree: 'fire', req: 1, prereq: [], element: 'fire',
+    id: 'firebolt', name: 'Fire Bolt', tree: 'fire', req: 1, prereq: [], element: 'fire', iconSeed: 0,
     mana: (l) => 2 + l * 0.3,
     damage: (l) => ({ min: 3 + 2 * (l - 1), max: 6 + 3 * (l - 1) }),
     blurb: 'A bolt of fire. Cheap, and it never stops being useful.',
@@ -409,13 +514,73 @@ export const SKILLS = [
     },
   },
   {
-    id: 'warmth', name: 'Warmth', tree: 'fire', req: 1, prereq: [], passive: true,
+    id: 'warmth', name: 'Warmth', tree: 'fire', req: 1, prereq: [], passive: true, iconSeed: 1,
     blurb: 'Mana returns faster.',
     effect: (l) => `+${30 + 12 * (l - 1)}% Mana Regeneration`,
     manaRegen: (l) => (30 + 12 * (l - 1)) / 100,
   },
   {
-    id: 'fireball', name: 'Fire Ball', tree: 'fire', req: 6, prereq: ['firebolt'], element: 'fire',
+    id: 'inferno', name: 'Inferno', tree: 'fire', req: 6, prereq: [], element: 'fire', iconSeed: 2,
+    mana: (l) => 4 + l * 0.2,
+    damage: (l) => ({ min: 6 + 3 * (l - 1), max: 11 + 4 * (l - 1) }),
+    synergies: [{ id: 'firebolt', pct: 8 }],
+    blurb: 'A gout of flame from the open hand. Cheap, and it catches a whole doorway.',
+    effect: () => `Cone ${INFERNO_RANGE} tiles long, everything in it burns once`,
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      const roll = rollFor(ctx, caster, sk, lvl);
+      const base = Math.atan2(ty - caster.y, tx - caster.x);
+      for (let i = 0; i < 12; i++) {
+        const t = 0.15 + ctx.rng.f() * 0.85;
+        const ang = base + ctx.rng.range(-INFERNO_SPREAD, INFERNO_SPREAD) * t;
+        ctx.fx.spawn('ember', caster.x + Math.cos(ang) * INFERNO_RANGE * t, caster.y + Math.sin(ang) * INFERNO_RANGE * t,
+          { z: 12, vz: 12, spread: 0.3, spreadZ: 6, r: 255, g: 150 - 60 * t, b: 40, size: 3, life: 0.3, lit: 1.4 });
+      }
+      damageCone(ctx, caster, tx, ty, INFERNO_RANGE, INFERNO_SPREAD, roll, 'fire',
+        { source: caster, pierce: pierceTable(caster) });
+      if (ctx.sfx) ctx.sfx('explode');
+    },
+  },
+  {
+    id: 'blaze', name: 'Blaze', tree: 'fire', req: 12, prereq: ['inferno'], element: 'fire', iconSeed: 3,
+    mana: (l) => 11 + l * 0.5,
+    dps: (l) => 15 + 5 * (l - 1),
+    duration: (l) => 4 + 0.2 * (l - 1),
+    synergies: [{ id: 'inferno', pct: 8 }],
+    blurb: 'Fire follows your heels. Lead them through it.',
+    effect(l) {
+      return `Fire where you run for ${this.duration(l).toFixed(1)}s; each patch burns ${BLAZE_LIFE}s within ${BLAZE_R} tiles`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      const dps = dpsFor(caster, sk, lvl);
+      const pierce = pierceTable(caster);
+      const drop = (c, p) => layHazard(c.level, {
+        x: p.x, y: p.y, r: BLAZE_R, element: 'fire', dps,
+        until: c.time + BLAZE_LIFE, tick: HAZARD_TICK, source: p, pierce,
+      });
+      // One patch under you now, then one every half second — but only once you
+      // have moved clear of the last. A trail is drawn by running; standing
+      // still would otherwise stack five fires on one tile and burn at five
+      // times the rate the tooltip promises.
+      drop(ctx, caster);
+      const at = { x: caster.x, y: caster.y };
+      caster.buffs.blaze = {
+        t: sk.duration(lvl),
+        proc: {
+          every: BLAZE_EVERY,
+          fn: (c, p) => {
+            if (Math.hypot(p.x - at.x, p.y - at.y) < BLAZE_R * 2) return;
+            at.x = p.x; at.y = p.y;
+            drop(c, p);
+          },
+        },
+      };
+      if (ctx.sfx) ctx.sfx('cast');
+    },
+  },
+  {
+    id: 'fireball', name: 'Fire Ball', tree: 'fire', req: 12, prereq: ['firebolt'], element: 'fire', iconSeed: 4,
     mana: (l) => 5 + l * 0.5,
     damage: (l) => ({ min: 8 + 4 * (l - 1), max: 16 + 5 * (l - 1) }),
     synergies: [{ id: 'firebolt', pct: 14 }],
@@ -439,7 +604,57 @@ export const SKILLS = [
     },
   },
   {
-    id: 'meteor', name: 'Meteor', tree: 'fire', req: 18, prereq: ['fireball'], element: 'fire',
+    id: 'firewall', name: 'Fire Wall', tree: 'fire', req: 18, prereq: ['blaze'], element: 'fire', iconSeed: 5,
+    mana: (l) => 15 + l * 0.5,
+    dps: (l) => 16 + 6 * (l - 1),
+    duration: (l) => 4 + 0.2 * (l - 1),
+    synergies: [{ id: 'inferno', pct: 6 }, { id: 'blaze', pct: 6 }],
+    blurb: 'A sheet of flame stood up across their path. They will walk into it anyway.',
+    effect(l) {
+      return `A wall ${WALL_LEN.toFixed(1)} tiles wide, burns for ${this.duration(l).toFixed(1)}s`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      const dps = dpsFor(caster, sk, lvl);
+      const pierce = pierceTable(caster);
+      const until = ctx.time + sk.duration(lvl);
+      // Three burning stretches laid across the aim rather than along it: a
+      // wall stands between you and them, which is the whole point of one.
+      const a = aimVector(caster, tx, ty, 1);
+      const px = -a.dy, py = a.dx;
+      let stood = 0;
+      for (let i = 0; i < WALL_SEGMENTS; i++) {
+        const o = (i - (WALL_SEGMENTS - 1) / 2) * WALL_GAP;
+        const sx = tx + px * o, sy = ty + py * o;
+        if (ctx.level.blocked(sx, sy)) continue;
+        layHazard(ctx.level, { x: sx, y: sy, r: WALL_R, element: 'fire', dps, until, tick: HAZARD_TICK, source: caster, pierce });
+        ctx.fx.ring(sx, sy, { maxR: WALL_R, cr: 255, cg: 140, cb: 50, life: 0.3, w: 3, lit: 1.6 });
+        stood++;
+      }
+      if (!stood) return false;                   // nothing but rock there
+      if (ctx.sfx) ctx.sfx('explode');
+      return true;
+    },
+  },
+  {
+    id: 'enchant', name: 'Enchant', tree: 'fire', req: 18, prereq: ['warmth'], element: 'fire', iconSeed: 7,
+    mana: (l) => 14 + l * 0.5,
+    damage: (l) => ({ min: 8 + 3 * (l - 1), max: 16 + 5 * (l - 1) }),
+    duration: (l) => 90 + 6 * (l - 1),
+    synergies: [{ id: 'firebolt', pct: 5 }, { id: 'warmth', pct: 5 }],
+    blurb: 'Fire laid along the edge of whatever you are holding.',
+    effect(l) { return `Adds the fire above to every swing, for ${Math.round(this.duration(l))}s`; },
+    cast(caster, lvl, tx, ty, ctx) {
+      // The buff carries the numbers the tooltip printed, so what the swing
+      // adds is exactly what was promised at the moment it was cast.
+      const d = skillDamage(caster, 'enchant');
+      caster.buffs.enchant = { t: this.duration(lvl), min: d.min, max: d.max };
+      ctx.fx.burst('ember', caster.x, caster.y, 14, { z: 14, spread: 1.4, spreadZ: 20, r: 255, g: 170, b: 60, life: 0.5 });
+      ctx.fx.ring(caster.x, caster.y, { maxR: 1.6, cr: 255, cg: 160, cb: 60, life: 0.35, w: 3, lit: 1.6 });
+    },
+  },
+  {
+    id: 'meteor', name: 'Meteor', tree: 'fire', req: 24, prereq: ['fireball'], element: 'fire', iconSeed: 6,
     mana: (l) => 12 + l * 0.6,
     damage: (l) => ({ min: 40 + 12 * (l - 1), max: 62 + 16 * (l - 1) }),
     synergies: [{ id: 'firebolt', pct: 8 }, { id: 'fireball', pct: 8 }],
@@ -476,14 +691,37 @@ export const SKILLS = [
     },
   },
   {
-    id: 'firemastery', name: 'Fire Mastery', tree: 'fire', req: 24, prereq: ['fireball'], passive: true,
+    id: 'firemastery', name: 'Fire Mastery', tree: 'fire', req: 30, prereq: ['fireball'], passive: true, iconSeed: 8,
     blurb: 'Fire skills do more damage, and enemy fire resistance counts for less.',
     effect: (l) => `-${Math.min(130, 15 + 6 * (l - 1))}% Enemy Fire Resist, +${10 + 3 * (l - 1)}% Fire Damage`,
+  },
+  {
+    id: 'hydra', name: 'Hydra', tree: 'fire', req: 30, prereq: ['firewall'], element: 'fire', iconSeed: 9,
+    mana: (l) => 20 + l * 0.5,
+    damage: (l) => ({ min: 8 + 3 * (l - 1), max: 14 + 4 * (l - 1) }),
+    duration: (l) => 8 + 0.4 * (l - 1),
+    synergies: [{ id: 'firebolt', pct: 5 }, { id: 'firewall', pct: 5 }],
+    blurb: 'A head of fire planted in the ground. It picks its own targets, and nothing picks it.',
+    effect(l) { return `Spits a bolt every ${HYDRA_RATE.toFixed(1)}s for ${this.duration(l).toFixed(1)}s`; },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      const spot = ctx.level.nearestOpen(tx, ty, 4);
+      if (ctx.level.blockedCircle(spot.x, spot.y, 0.3)) return false;
+      addPet(ctx.level, {
+        kind: 'hydra', x: spot.x, y: spot.y, element: 'fire',
+        until: ctx.time + sk.duration(lvl), rate: HYDRA_RATE,
+        roll: rollFor(ctx, caster, sk, lvl), owner: caster, pierce: pierceTable(caster),
+      });
+      ctx.fx.burst('ember', spot.x, spot.y, 16, { z: 6, spread: 1.6, spreadZ: 26, r: 255, g: 150, b: 50, life: 0.6 });
+      ctx.fx.ring(spot.x, spot.y, { maxR: 1.2, cr: 255, cg: 140, cb: 50, life: 0.4, w: 3, lit: 1.8 });
+      if (ctx.sfx) ctx.sfx('explode');
+      return true;
+    },
   },
 
   // ------------------------------------------------------------------- COLD
   {
-    id: 'icebolt', name: 'Ice Bolt', tree: 'cold', req: 1, prereq: [], element: 'cold',
+    id: 'icebolt', name: 'Ice Bolt', tree: 'cold', req: 1, prereq: [], element: 'cold', iconSeed: 0,
     mana: (l) => 2 + l * 0.3,
     damage: (l) => ({ min: 3 + 2 * (l - 1), max: 5 + 3 * (l - 1) }),
     blurb: 'Slows whatever it hits.',
@@ -503,7 +741,26 @@ export const SKILLS = [
     },
   },
   {
-    id: 'frostnova', name: 'Frost Nova', tree: 'cold', req: 6, prereq: ['icebolt'], element: 'cold',
+    id: 'frozenarmor', name: 'Frozen Armor', tree: 'cold', req: 1, prereq: [], element: 'cold', iconSeed: 10,
+    mana: (l) => 6 + l * 0.3,
+    defence: (l) => 30 + 5 * (l - 1),
+    chill: (l) => ({ seconds: 2 + 0.1 * (l - 1), amount: 0.4 }),
+    duration: (l) => 60 + 6 * (l - 1),
+    blurb: 'Ice sheathes you, and whatever strikes it comes away slow.',
+    effect(l) {
+      return `+${this.defence(l)}% Defence, attackers chilled ${this.chill(l).seconds.toFixed(1)}s, for ${Math.round(this.duration(l))}s`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      wearArmour(caster, 'frozenarmor', {
+        t: this.duration(lvl), defPct: this.defence(lvl), onStruckChill: this.chill(lvl),
+      });
+      ctx.fx.ring(caster.x, caster.y, { maxR: 1.8, cr: 150, cg: 220, cb: 255, life: 0.4, w: 3, lit: 1.4 });
+      ctx.fx.burst('ice', caster.x, caster.y, 14, { z: 14, spread: 1.6, spreadZ: 22, r: 160, g: 225, b: 255, life: 0.5 });
+      if (ctx.sfx) ctx.sfx('ice');
+    },
+  },
+  {
+    id: 'frostnova', name: 'Frost Nova', tree: 'cold', req: 6, prereq: ['icebolt'], element: 'cold', iconSeed: 1,
     mana: (l) => 7 + l * 0.4,
     damage: (l) => ({ min: 4 + 2 * (l - 1), max: 8 + 3 * (l - 1) }),
     synergies: [{ id: 'icebolt', pct: 15 }],
@@ -523,7 +780,125 @@ export const SKILLS = [
     },
   },
   {
-    id: 'frozenorb', name: 'Frozen Orb', tree: 'cold', req: 24, prereq: ['frostnova'], element: 'cold',
+    id: 'iceblast', name: 'Ice Blast', tree: 'cold', req: 6, prereq: ['icebolt'], element: 'cold', iconSeed: 11,
+    mana: (l) => 6 + l * 0.4,
+    damage: (l) => ({ min: 10 + 4 * (l - 1), max: 16 + 5 * (l - 1) }),
+    freeze: (l) => 1.4 + 0.1 * (l - 1),
+    synergies: [{ id: 'icebolt', pct: 12 }],
+    blurb: 'One thing, stopped where it stands.',
+    effect(l) { return `Freezes solid for ${this.freeze(l).toFixed(1)}s`; },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this, a = aimVector(caster, tx, ty, 14);
+      const roll = rollFor(ctx, caster, sk, lvl);
+      const pierce = pierceTable(caster);
+      const freeze = sk.freeze(lvl);
+      ctx.projectiles.spawn({
+        x: caster.x, y: caster.y, z: 18, vx: a.vx, vy: a.vy, speed: 14,
+        element: 'cold', colour: '#a8e4ff', drawR: 6, light: 5, ttl: 2,
+        trail: (p) => { if (ctx.rng.chance(0.6)) ctx.fx.spawn('ice', p.x, p.y, { z: p.z, spread: 0.4, spreadZ: 3, r: 180, g: 235, b: 255, size: 2.2, life: 0.3 }); },
+        onHit: (p, e) => {
+          ctx.damageMonster(e, { cold: roll() }, { source: caster, pierce });
+          applyFreeze(e, freeze);
+          ctx.fx.burst('ice', e.x, e.y, 12, { z: 12, spread: 1.4, r: 190, g: 240, b: 255, life: 0.45 });
+        },
+        onExpire: (p) => ctx.fx.burst('ice', p.x, p.y, 6, { z: p.z, spread: 1.2, r: 170, g: 235, b: 255, life: 0.3 }),
+      });
+      if (ctx.sfx) ctx.sfx('ice');
+    },
+  },
+  {
+    id: 'shiverarmor', name: 'Shiver Armor', tree: 'cold', req: 12, prereq: ['frozenarmor'], element: 'cold', iconSeed: 3,
+    mana: (l) => 9 + l * 0.4,
+    defence: (l) => 55 + 7 * (l - 1),
+    chill: (l) => ({ seconds: 3 + 0.1 * (l - 1), amount: 0.5 }),
+    duration: (l) => 60 + 6 * (l - 1),
+    blurb: 'Thicker ice, and a colder answer for whoever tests it.',
+    effect(l) {
+      return `+${this.defence(l)}% Defence, attackers chilled ${this.chill(l).seconds.toFixed(1)}s, for ${Math.round(this.duration(l))}s`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      wearArmour(caster, 'shiverarmor', {
+        t: this.duration(lvl), defPct: this.defence(lvl), onStruckChill: this.chill(lvl),
+      });
+      ctx.fx.ring(caster.x, caster.y, { maxR: 2, cr: 150, cg: 220, cb: 255, life: 0.4, w: 4, lit: 1.6 });
+      ctx.fx.burst('ice', caster.x, caster.y, 18, { z: 14, spread: 1.8, spreadZ: 24, r: 160, g: 225, b: 255, life: 0.55 });
+      if (ctx.sfx) ctx.sfx('ice');
+    },
+  },
+  {
+    id: 'glacialspike', name: 'Glacial Spike', tree: 'cold', req: 18, prereq: ['iceblast'], element: 'cold', iconSeed: 6,
+    mana: (l) => 11 + l * 0.5,
+    damage: (l) => ({ min: 14 + 5 * (l - 1), max: 24 + 7 * (l - 1) }),
+    freeze: (l) => 1.2 + 0.06 * (l - 1),
+    radius: SPIKE_R,
+    synergies: [{ id: 'icebolt', pct: 6 }, { id: 'iceblast', pct: 6 }],
+    blurb: 'A shard that bursts, and holds a whole pack still while it does.',
+    effect(l) { return `Bursts over ${SPIKE_R} tiles, freezes them for ${this.freeze(l).toFixed(1)}s`; },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this, a = aimVector(caster, tx, ty, 11);
+      const roll = rollFor(ctx, caster, sk, lvl);
+      const pierce = pierceTable(caster);
+      const freeze = sk.freeze(lvl);
+      ctx.projectiles.spawn({
+        x: caster.x, y: caster.y, z: 18, vx: a.vx, vy: a.vy, speed: 11,
+        element: 'cold', colour: '#bfeaff', drawR: 8, light: 6, ttl: 2.2, radius: 0.35,
+        trail: (p) => ctx.fx.spawn('ice', p.x, p.y, { z: p.z, spread: 0.5, spreadZ: 4, r: 190, g: 240, b: 255, size: 2.6, life: 0.35 }),
+        onExpire: (p) => {
+          FX.iceBurst(ctx.fx, p.x, p.y, SPIKE_R);
+          for (const e of ctx.level.entities) {
+            if (!e.alive || e.isPlayer || e.isNpc) continue;
+            if (Math.hypot(e.x - p.x, e.y - p.y) > SPIKE_R + e.radius) continue;
+            ctx.damageMonster(e, { cold: roll() }, { source: caster, pierce });
+            applyFreeze(e, freeze);
+          }
+          if (ctx.sfx) ctx.sfx('ice');
+        },
+      });
+    },
+  },
+  {
+    id: 'blizzard', name: 'Blizzard', tree: 'cold', req: 24, prereq: ['glacialspike'], element: 'cold', iconSeed: 5,
+    mana: (l) => 22 + l * 0.5,
+    dps: (l) => 18 + 6 * (l - 1),
+    duration: (l) => 4 + 0.2 * (l - 1),
+    synergies: [{ id: 'icebolt', pct: 4 }, { id: 'glacialspike', pct: 4 }],
+    blurb: 'Weather, called down on one patch of ground and left to work.',
+    effect(l) { return `Ice falls over ${BLIZZARD_R} tiles for ${this.duration(l).toFixed(1)}s`; },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      layHazard(ctx.level, {
+        x: tx, y: ty, r: BLIZZARD_R, element: 'cold', dps: dpsFor(caster, sk, lvl),
+        until: ctx.time + sk.duration(lvl), tick: HAZARD_TICK,
+        source: caster, pierce: pierceTable(caster),
+      });
+      ctx.fx.ring(tx, ty, { maxR: BLIZZARD_R, cr: 150, cg: 220, cb: 255, life: 0.5, w: 3, lit: 1.4 });
+      if (ctx.sfx) ctx.sfx('ice');
+    },
+  },
+  {
+    id: 'chillingarmor', name: 'Chilling Armor', tree: 'cold', req: 24, prereq: ['shiverarmor'], element: 'cold', iconSeed: 7,
+    mana: (l) => 12 + l * 0.4,
+    damage: (l) => ({ min: 10 + 3 * (l - 1), max: 18 + 4 * (l - 1) }),
+    defence: (l) => 80 + 9 * (l - 1),
+    chill: (l) => ({ seconds: 3.5 + 0.1 * (l - 1), amount: 0.55 }),
+    duration: (l) => 60 + 6 * (l - 1),
+    blurb: 'The ice stops waiting to be hit and hits back.',
+    effect(l) {
+      return `+${this.defence(l)}% Defence, attackers take the cold above and are chilled ${this.chill(l).seconds.toFixed(1)}s, for ${Math.round(this.duration(l))}s`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const d = skillDamage(caster, 'chillingarmor');
+      wearArmour(caster, 'chillingarmor', {
+        t: this.duration(lvl), defPct: this.defence(lvl), onStruckChill: this.chill(lvl),
+        onStruckDamage: { element: 'cold', min: d.min, max: d.max, pierce: pierceTable(caster) },
+      });
+      ctx.fx.ring(caster.x, caster.y, { maxR: 2.2, cr: 150, cg: 220, cb: 255, life: 0.45, w: 4, lit: 1.8 });
+      ctx.fx.burst('ice', caster.x, caster.y, 20, { z: 14, spread: 2, spreadZ: 26, r: 170, g: 230, b: 255, life: 0.6 });
+      if (ctx.sfx) ctx.sfx('ice');
+    },
+  },
+  {
+    id: 'frozenorb', name: 'Frozen Orb', tree: 'cold', req: 30, prereq: ['blizzard'], element: 'cold', iconSeed: 4,
     mana: (l) => 16 + l * 0.6,
     damage: (l) => ({ min: 5 + 2 * (l - 1), max: 9 + 3 * (l - 1) }),
     synergies: [{ id: 'icebolt', pct: 2 }, { id: 'frostnova', pct: 2 }],
@@ -559,14 +934,14 @@ export const SKILLS = [
     },
   },
   {
-    id: 'coldmastery', name: 'Cold Mastery', tree: 'cold', req: 24, prereq: ['frostnova'], passive: true,
+    id: 'coldmastery', name: 'Cold Mastery', tree: 'cold', req: 30, prereq: ['frostnova'], passive: true, iconSeed: 8,
     blurb: 'Enemy cold resistance counts for much less.',
     effect: (l) => `-${Math.min(130, 20 + 7 * (l - 1))}% Enemy Cold Resist`,
   },
 
   // -------------------------------------------------------------- LIGHTNING
   {
-    id: 'chargedbolt', name: 'Charged Bolt', tree: 'light', req: 1, prereq: [], element: 'light',
+    id: 'chargedbolt', name: 'Charged Bolt', tree: 'light', req: 1, prereq: [], element: 'light', iconSeed: 0,
     mana: (l) => 3 + l * 0.3,
     damage: (l) => ({ min: 2 + 1.5 * (l - 1), max: 4 + 2 * (l - 1) }),
     bolts: (l) => Math.min(12, 3 + Math.floor(l / 2)),
@@ -593,7 +968,7 @@ export const SKILLS = [
     },
   },
   {
-    id: 'staticfield', name: 'Static Field', tree: 'light', req: 6, prereq: ['chargedbolt'], element: 'light',
+    id: 'staticfield', name: 'Static Field', tree: 'light', req: 6, prereq: ['chargedbolt'], element: 'light', iconSeed: 4,
     mana: () => 9,
     radius: (l) => 4.2 + l * 0.28,
     blurb: 'Strips a quarter of the current life from everything nearby. Brutal on things with a lot of it.',
@@ -614,7 +989,91 @@ export const SKILLS = [
     },
   },
   {
-    id: 'teleport', name: 'Teleport', tree: 'light', req: 6, prereq: ['staticfield'],
+    id: 'telekinesis', name: 'Telekinesis', tree: 'light', req: 6, prereq: [], element: 'light', iconSeed: 2,
+    mana: (l) => 4 + l * 0.3,
+    damage: (l) => ({ min: 5 + 2 * (l - 1), max: 9 + 3 * (l - 1) }),
+    stun: (l) => 0.4 + 0.03 * (l - 1),
+    blurb: 'A shove of the mind. It hurts less than it inconveniences.',
+    effect(l) {
+      return `Reach ${TK_REACH} tiles, knocks back ${TK_PUSH} tiles and stuns ${this.stun(l).toFixed(2)}s`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      const t = targetNear(ctx, tx, ty);
+      // Nothing grabbed means nothing spent: the click walks instead.
+      if (!t || caster.distTo(t) > TK_REACH) return false;
+      const roll = rollFor(ctx, caster, sk, lvl);
+      ctx.fx.arc(caster.x, caster.y, t.x, t.y, { z: 16, w: 2 });
+      ctx.damageMonster(t, { light: roll() }, { source: caster, pierce: pierceTable(caster) });
+      if (t.alive) {
+        knockback(ctx.level, t, caster.x, caster.y, TK_PUSH);
+        applyStun(t, sk.stun(lvl));
+      }
+      if (ctx.sfx) ctx.sfx('lightning');
+      return true;
+    },
+  },
+  {
+    id: 'nova', name: 'Nova', tree: 'light', req: 12, prereq: ['staticfield'], element: 'light', iconSeed: 1,
+    mana: (l) => 14 + l * 0.6,
+    damage: (l) => ({ min: 4 + 3 * (l - 1), max: 11 + 4 * (l - 1) }),
+    synergies: [{ id: 'chargedbolt', pct: 6 }],
+    radius: 5.2,
+    blurb: 'A ring of lightning in every direction at once.',
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      const roll = rollFor(ctx, caster, sk, lvl);
+      ctx.fx.ring(caster.x, caster.y, { maxR: sk.radius, cr: 180, cg: 210, cb: 255, life: 0.36, w: 5, lit: 2.4 });
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * TAU;
+        ctx.fx.arc(caster.x, caster.y, caster.x + Math.cos(a) * sk.radius, caster.y + Math.sin(a) * sk.radius, { z: 12, w: 2 });
+      }
+      damageArea(ctx, caster.x, caster.y, sk.radius, roll, 'light', { source: caster, pierce: pierceTable(caster) });
+      if (ctx.sfx) ctx.sfx('lightning', { big: true });
+    },
+  },
+  {
+    id: 'lightning', name: 'Lightning', tree: 'light', req: 12, prereq: ['chargedbolt'], element: 'light', iconSeed: 9,
+    mana: (l) => 9 + l * 0.5,
+    damage: (l) => ({ min: 4 + 2 * (l - 1), max: 26 + 8 * (l - 1) }),
+    synergies: [{ id: 'chargedbolt', pct: 6 }],
+    blurb: 'A bolt down a straight line, there before you have finished pointing.',
+    effect: () => `Strikes everything in a line ${BOLT_RANGE} tiles long`,
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      beam(ctx, caster, tx, ty, {
+        roll: rollFor(ctx, caster, sk, lvl), element: 'light',
+        range: BOLT_RANGE, width: BOLT_WIDTH, pierce: pierceTable(caster),
+      });
+      if (ctx.sfx) ctx.sfx('lightning', { big: true });
+    },
+  },
+  {
+    id: 'chainlightning', name: 'Chain Lightning', tree: 'light', req: 18, prereq: ['lightning'], element: 'light', iconSeed: 3,
+    mana: (l) => 12 + l * 0.5,
+    damage: (l) => ({ min: 2 + 1.5 * (l - 1), max: 12 + 4 * (l - 1) }),
+    targets: (l) => Math.min(10, 4 + Math.floor((l - 1) / 5)),
+    synergies: [{ id: 'lightning', pct: 5 }],
+    blurb: 'It jumps. Stand them in a line and it does the walking.',
+    effect(l) { return `Touches up to ${this.targets(l)} enemies, each for the damage above`; },
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this, a = aimVector(caster, tx, ty, 16);
+      const roll = rollFor(ctx, caster, sk, lvl);
+      const pierce = pierceTable(caster);
+      ctx.projectiles.spawn({
+        x: caster.x, y: caster.y, z: 16, vx: a.vx, vy: a.vy, speed: 16,
+        element: 'light', colour: '#cfe0ff', drawR: 4, light: 3.4, ttl: 1.4, radius: 0.3,
+        chain: sk.targets(lvl) - 1,
+        onHit: (p, e) => {
+          ctx.damageMonster(e, { light: roll() }, { source: caster, pierce });
+          ctx.fx.burst('spark', e.x, e.y, 5, { z: 16, spread: 1.2, r: 200, g: 220, b: 255, life: 0.25 });
+        },
+      });
+      if (ctx.sfx) ctx.sfx('lightning');
+    },
+  },
+  {
+    id: 'teleport', name: 'Teleport', tree: 'light', req: 18, prereq: ['telekinesis'], iconSeed: 6,
     mana: (l) => Math.max(8, 24 - l),
     range: 14,
     blurb: 'Step across the room. Walls do not care, but they do stop you landing in them.',
@@ -636,26 +1095,54 @@ export const SKILLS = [
     },
   },
   {
-    id: 'nova', name: 'Nova', tree: 'light', req: 18, prereq: ['staticfield'], element: 'light',
-    mana: (l) => 14 + l * 0.6,
-    damage: (l) => ({ min: 4 + 3 * (l - 1), max: 11 + 4 * (l - 1) }),
-    synergies: [{ id: 'chargedbolt', pct: 6 }],
-    radius: 5.2,
-    blurb: 'A ring of lightning in every direction at once.',
+    id: 'thunderstorm', name: 'Thunder Storm', tree: 'light', req: 24, prereq: ['chainlightning'], element: 'light', iconSeed: 5,
+    mana: (l) => 20 + l * 0.5,
+    damage: (l) => ({ min: 6 + 3 * (l - 1), max: 14 + 5 * (l - 1) }),
+    duration: (l) => 20 + (l - 1),
+    synergies: [{ id: 'chainlightning', pct: 4 }],
+    blurb: 'A cloud that follows you, and takes an interest in whoever is nearest.',
+    effect(l) {
+      return `Strikes one enemy within ${STORM_RANGE} tiles every ${STORM_EVERY.toFixed(1)}s, for ${Math.round(this.duration(l))}s`;
+    },
     cast(caster, lvl, tx, ty, ctx) {
       const sk = this;
       const roll = rollFor(ctx, caster, sk, lvl);
-      ctx.fx.ring(caster.x, caster.y, { maxR: sk.radius, cr: 180, cg: 210, cb: 255, life: 0.36, w: 5, lit: 2.4 });
-      for (let i = 0; i < 10; i++) {
-        const a = (i / 10) * TAU;
-        ctx.fx.arc(caster.x, caster.y, caster.x + Math.cos(a) * sk.radius, caster.y + Math.sin(a) * sk.radius, { z: 12, w: 2 });
-      }
-      damageArea(ctx, caster.x, caster.y, sk.radius, roll, 'light', { source: caster, pierce: pierceTable(caster) });
-      if (ctx.sfx) ctx.sfx('lightning', { big: true });
+      const pierce = pierceTable(caster);
+      caster.buffs.thunderstorm = {
+        t: sk.duration(lvl),
+        proc: {
+          every: STORM_EVERY,
+          fn: (c, p) => {
+            const t = randomNear(c, p.x, p.y, STORM_RANGE);
+            if (!t) return;
+            c.fx.arc(p.x, p.y, t.x, t.y, { z: 40, w: 3 });
+            c.fx.burst('spark', t.x, t.y, 8, { z: 16, spread: 1.6, r: 210, g: 225, b: 255, life: 0.3 });
+            c.damageMonster(t, { light: roll() }, { source: p, pierce });
+            if (c.sfx) c.sfx('lightning');
+          },
+        },
+      };
+      ctx.fx.ring(caster.x, caster.y, { maxR: 2.4, cr: 180, cg: 210, cb: 255, life: 0.4, w: 3, lit: 1.6 });
     },
   },
   {
-    id: 'lightmastery', name: 'Lightning Mastery', tree: 'light', req: 24, prereq: ['nova'], passive: true,
+    id: 'energyshield', name: 'Energy Shield', tree: 'light', req: 24, prereq: ['telekinesis'], iconSeed: 10,
+    mana: (l) => 15 + l * 0.5,
+    split: (l) => Math.min(0.6, 0.2 + 0.02 * (l - 1)),
+    duration: (l) => 40 + 4 * (l - 1),
+    blurb: 'Blows land on the mana first. An empty orb is no shield at all.',
+    effect(l) {
+      return `${Math.round(this.split(l) * 100)}% of damage taken is paid from mana, for ${Math.round(this.duration(l))}s`;
+    },
+    cast(caster, lvl, tx, ty, ctx) {
+      caster.buffs.energyshield = { t: this.duration(lvl), esplit: this.split(lvl) };
+      ctx.fx.ring(caster.x, caster.y, { maxR: 2, cr: 150, cg: 180, cb: 255, life: 0.4, w: 3, lit: 1.6 });
+      ctx.fx.burst('glow', caster.x, caster.y, 14, { z: 16, spread: 1.6, r: 150, g: 180, b: 255, life: 0.5 });
+      if (ctx.sfx) ctx.sfx('cast');
+    },
+  },
+  {
+    id: 'lightmastery', name: 'Lightning Mastery', tree: 'light', req: 30, prereq: ['nova'], passive: true, iconSeed: 8,
     blurb: 'Enemy lightning resistance counts for much less.',
     effect: (l) => `-${Math.min(130, 20 + 7 * (l - 1))}% Enemy Lightning Resist`,
   },
@@ -908,6 +1395,7 @@ export const TREE_NAME = {
   fire: 'Fire', cold: 'Cold', light: 'Lightning',
   cries: 'Warcries', combat: 'Combat', mastery: 'Masteries',
 };
+const ELEMENT_NAME = { fire: 'Fire', cold: 'Cold', light: 'Lightning', phys: 'Physical' };
 
 // ------------------------------------------------------------- allocation
 
@@ -984,6 +1472,9 @@ export function describeSkill(player, id) {
   if (sk.mana) lines.push({ text: `Mana Cost: ${manaCost(player, id)}`, colour: '#7a86ff' });
   const dmg = skillDamage(player, id);
   if (dmg) lines.push({ text: `Damage: ${dmg.min} to ${dmg.max}`, colour: '#7a86ff' });
+  // Ground that keeps burning quotes a rate rather than a hit, because a rate
+  // is what standing in it actually costs.
+  if (sk.dps) lines.push({ text: `${skillDps(player, id)} ${ELEMENT_NAME[sk.element]} Damage per Second`, colour: '#7a86ff' });
   if (sk.effect) lines.push({ text: sk.effect(lvl), colour: '#7a86ff' });
   if (sk.synergies && sk.synergies.length) {
     const pct = synergyPct(player, sk);

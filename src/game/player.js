@@ -91,8 +91,9 @@ export class Player extends Entity {
     // will honour: `plusSkills` (levels added to every skill while it lasts),
     // `esplit` (the share of a blow paid from mana before life), `onStruckChill`
     // and `onStruckDamage` (what a melee blow on you gets back), `proc:
-    // { every, fn }` (something it does on its own timer), and `stacks:
-    // { max, decay }` with `ias`, which is Frenzy: swing speed per live stack.
+    // { every, fn }` (something it does on its own timer), `defPct` (defence
+    // granted, which is the cold armours), and `stacks: { max, decay }` with
+    // `ias`, which is Frenzy: swing speed per live stack.
     this.buffs = {};
     this.masteryPoints = { axe: 0, mace: 0, sword: 0 }; // written by refreshPassives
     this.ironSkinLevel = 0;
@@ -121,6 +122,11 @@ export class Player extends Entity {
     let def = defenseFrom(dex, armour);
     if (this.ironSkinLevel > 0) def *= 1 + (30 + 10 * (this.ironSkinLevel - 1)) / 100;
     if (this.buffs.shout) def *= 1 + this.buffs.shout.mag / 100;
+    // A buff carrying `defPct` is armour worn as a spell: the cold armours.
+    for (const id in this.buffs) {
+      const pct = this.buffs[id].defPct;
+      if (pct) def *= 1 + pct / 100;
+    }
     this.defense = Math.floor(def);
 
     for (const el of ['fire', 'cold', 'light', 'pois']) {

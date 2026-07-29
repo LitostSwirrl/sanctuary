@@ -16,6 +16,83 @@ const TREE_COLOUR = {
 };
 const skillIcons = new Map();
 
+// Marks for the spell trees. Ten skills to a tree is too many for one element
+// shape and a count of pips, so the shape says which spell and the colour says
+// which tree: a mark is never used twice inside one tree, and no two trees
+// share a palette.
+const MARKS = [
+  // 0 bolt
+  (b, rm, hi) => {
+    polyF(b, [15, 3, 21, 14, 15, 21, 9, 14], rm.base);
+    polyF(b, [15, 3, 21, 14, 15, 14], rm.light);
+    capsule(b, 15, 20, 2.2, 15, 27, 1.1, rm);
+  },
+  // 1 ring
+  (b, rm, hi) => {
+    ellipse(b, 15, 15, 11, 11, rm);
+    ellipseF(b, 15, 15, 7, 7, 0);
+    ellipseF(b, 15, 15, 2.4, 2.4, hi);
+  },
+  // 2 cone
+  (b, rm) => {
+    for (let i = -1; i <= 1; i++) capsule(b, 5, 15, 2, 26, 15 + i * 9, 1.1, rm);
+  },
+  // 3 trail
+  (b, rm, hi) => {
+    ellipse(b, 8, 22, 4.4, 4.4, rm);
+    ellipse(b, 16, 15, 3.4, 3.4, rm);
+    ellipse(b, 23, 8, 2.4, 2.4, rm);
+    ellipseF(b, 8, 22, 1.6, 1.6, hi);
+  },
+  // 4 orb
+  (b, rm, hi) => {
+    ellipse(b, 15, 15, 9.5, 9.5, rm);
+    ellipseF(b, 11.5, 11.5, 2.6, 2.6, hi);
+  },
+  // 5 bars
+  (b, rm) => {
+    for (let i = 0; i < 3; i++) capsule(b, 7 + i * 8, 4, 2, 7 + i * 8, 26, 2, rm);
+  },
+  // 6 comet
+  (b, rm, hi) => {
+    capsule(b, 17, 13, 3, 4, 26, 0.8, rm);
+    ellipse(b, 20, 10, 5.5, 5.5, rm);
+    ellipseF(b, 18.5, 8.5, 1.8, 1.8, hi);
+  },
+  // 7 star
+  (b, rm, hi) => {
+    polyF(b, [15, 2, 18, 12, 28, 15, 18, 18, 15, 28, 12, 18, 2, 15, 12, 12], rm.base);
+    ellipseF(b, 15, 15, 2.4, 2.4, hi);
+  },
+  // 8 chevrons
+  (b, rm) => {
+    for (let i = 0; i < 2; i++) {
+      const y = 13 + i * 9;
+      capsule(b, 5, y + 6, 2, 15, y - 2, 2, rm);
+      capsule(b, 15, y - 2, 2, 25, y + 6, 2, rm);
+    }
+  },
+  // 9 zigzag
+  (b, rm, hi) => {
+    polyF(b, [18, 2, 8, 16, 14, 16, 11, 28, 23, 13, 16, 13], rm.base);
+    lineP(b, 17, 4, 10, 15, hi);
+  },
+  // 10 shield
+  (b, rm, hi) => {
+    polyF(b, [5, 5, 25, 5, 25, 15, 15, 27, 5, 15], rm.base);
+    polyF(b, [5, 5, 15, 5, 15, 27, 5, 15], rm.light);
+    ellipseF(b, 15, 13, 2.6, 2.6, hi);
+  },
+  // 11 block
+  (b, rm, hi) => {
+    polyF(b, [10, 4, 20, 4, 26, 15, 20, 26, 10, 26, 4, 15], rm.base);
+    polyF(b, [10, 4, 15, 4, 15, 26, 10, 26, 4, 15], rm.light);
+    lineP(b, 15, 4, 15, 26, hi);
+  },
+];
+
+const MARK_HI = { fire: '#ffd060', cold: '#e8f8ff', light: '#eef2ff' };
+
 // A small glyph per skill: element-shaped, varied by index so two fire skills
 // are still distinguishable at a glance.
 function bakeSkillIcon(id) {
@@ -26,16 +103,8 @@ function bakeSkillIcon(id) {
   const rm = ramp(base);
   const idx = SKILL_BY_ID[id].iconSeed ?? Object.keys(SKILL_BY_ID).indexOf(id);
 
-  if (sk.tree === 'fire') {
-    polyF(buf, [15, 3, 22, 14, 19, 26, 11, 26, 8, 14], packHex(base));
-    ellipse(buf, 15, 19, 5, 6, ramp('#ffd060'));
-  } else if (sk.tree === 'cold') {
-    for (let i = 0; i < 3; i++) {
-      const a = (i / 3) * Math.PI;
-      capsule(buf, 15 - Math.cos(a) * 11, 15 - Math.sin(a) * 11, 1.6,
-        15 + Math.cos(a) * 11, 15 + Math.sin(a) * 11, 1.6, rm);
-    }
-    ellipse(buf, 15, 15, 4, 4, ramp('#e8f8ff'));
+  if (MARK_HI[sk.tree]) {
+    MARKS[idx % MARKS.length](buf, rm, packHex(MARK_HI[sk.tree]));
   } else if (sk.tree === 'combat') {
     // Axe wedge on a haft.
     capsule(buf, 13, 27, 1.6, 13, 5, 1.4, ramp('#5a4028'));
