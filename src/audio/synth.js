@@ -240,6 +240,17 @@ let music = null;          // { key, bus, bar, nextTime, timer }
 const LOOKAHEAD = 1.5;     // seconds of notes kept scheduled ahead
 const MUSIC_TICK = 300;    // ms between scheduler passes
 
+// How loud the score sits against the effects. Every level in the mood table
+// below was set by ear against its neighbours in the same mood, and those
+// balances are worth keeping; what they were not set against is the rest of
+// the game, because when they were written a drone was still carrying the
+// atmosphere. It is gone, and the music carries it alone now, which wants
+// about five decibels more than the moods were drawn at. One number here
+// rather than sixty in the table: the mixes stay as composed, and the whole
+// score moves together. Measured after: the loudest mood peaks near 0.2,
+// still under the loudest single effect.
+const MUSIC_LEVEL = 1.8;
+
 const semiF = (root, s) => root * Math.pow(2, s / 12);
 
 // A number, or a [low, high] range to draw from. Moods use both.
@@ -612,24 +623,213 @@ function partCheck(key, part, o) {
   return true;
 }
 
+// --------------------------------------------------------- mini-notation
+//
+// A bar of music, written as a string. The shape is Tidal's and Strudel's;
+// the parser is ours — sixty lines, no dependency, nothing fetched, nothing
+// installed. Four things and no more:
+//
+//   "0 3 5 ~"      whitespace splits the bar into even slots; `~` is a rest
+//   "x ~ [x x] ~"  brackets subdivide one slot into as many events as they hold
+//   "0 x*3 ~ 5"    `*n` repeats an event inside its own slot
+//   "0 <5 7> ~ ~"  angles alternate across repetitions: bar N takes element N
+//
+// A token is an integer — a scale degree, negative allowed — or `x`, one
+// percussion hit. Nesting is unlimited; the tables below stay two deep, which
+// is as far as a bar of this music ever needs to go.
+//
+// Anything else is a mistake, and a mistake costs the pattern rather than the
+// music: an empty bar and one line of console, the same bargain every other
+// mood-table error strikes.
+
+const patternTokens = (s) => String(s).match(/[<>[\]*]|[^\s<>[\]*]+/g) || [];
+
+// seq := node* ; node := (atom | "[" seq "]" | "<" seq ">") ("*" n)?
+// Recursive descent over the token list, returning null the moment it reads
+// something the grammar has no room for — an unclosed bracket, a bare `*`, a
+// token that is neither a degree nor a hit nor a rest.
+function parseSeq(tk, i, close) {
+  const kids = [];
+  while (i < tk.length && tk[i] !== close) {
+    const t = tk[i++];
+    let node;
+    if (t === '[' || t === '<') {
+      const inner = parseSeq(tk, i, t === '[' ? ']' : '>');
+      if (!inner || !inner.kids.length) return null;
+      i = inner.i;
+      node = { alt: t === '<', kids: inner.kids };
+    } else if (t === ']' || t === '>' || t === '*') {
+      return null;
+    } else if (t === '~' || t === 'x' || /^-?\d+$/.test(t)) {
+      node = { atom: t };
+    } else {
+      return null;
+    }
+    if (tk[i] === '*') {
+      const n = Number(tk[i + 1]);
+      if (!Number.isInteger(n) || n < 1 || n > 64) return null;
+      node = { rep: n, kids: [node] };
+      i += 2;
+    }
+    kids.push(node);
+  }
+  if (close !== undefined && tk[i] !== close) return null;
+  return { kids, i: close === undefined ? i : i + 1 };
+}
+
+// One node laid out across the span of bar it owns, for one repetition.
+function emitPattern(node, t0, span, bar, out) {
+  if (node.atom !== undefined) {
+    if (node.atom !== '~') out.push({ t: t0, dur: span, value: node.atom === 'x' ? 'x' : +node.atom });
+    return;
+  }
+  if (node.rep) {
+    for (let i = 0; i < node.rep; i++) {
+      emitPattern(node.kids[0], t0 + (span * i) / node.rep, span / node.rep, bar, out);
+    }
+    return;
+  }
+  if (node.alt) { emitPattern(node.kids[bar % node.kids.length], t0, span, bar, out); return; }
+  const n = node.kids.length;
+  for (let i = 0; i < n; i++) emitPattern(node.kids[i], t0 + (span * i) / n, span / n, bar, out);
+}
+
+// How many repetitions a pattern takes to come back to where it started: the
+// lowest common multiple of every alternation in it, capped so that a line of
+// coprime angles cannot ask for thousands of bars of expansion.
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+function cycleOf(node) {
+  if (node.atom !== undefined) return 1;
+  let l = node.alt ? node.kids.length : 1;
+  for (const k of node.kids) { const c = cycleOf(k); l = (l * c) / gcd(l, c); }
+  return Math.min(16, l);
+}
+
+// One line of notation, compiled to events over one bar: `t` and `dur` are
+// fractions of the bar, `value` is a degree, `x`, or — when the line
+// alternates — the list a repetition indexes into, a null standing for the
+// bars where that slot has nothing to say.
+function compilePattern(str) {
+  let root = null;
+  try { root = parseSeq(patternTokens(str), 0, undefined); } catch { root = null; }
+  if (!root || !root.kids.length) {
+    once(`synth: pattern "${str}" is not notation this reads, so it plays nothing`);
+    return [];
+  }
+  const bars = Math.max(1, cycleOf(root));
+  const slots = new Map();
+  for (let b = 0; b < bars; b++) {
+    const events = [];
+    emitPattern(root, 0, 1, b, events);
+    for (const e of events) {
+      const at = `${e.t.toFixed(6)}:${e.dur.toFixed(6)}`;
+      let slot = slots.get(at);
+      if (!slot) { slot = { t: e.t, dur: e.dur, value: new Array(bars).fill(null) }; slots.set(at, slot); }
+      slot.value[b] = e.value;
+    }
+  }
+  return [...slots.values()]
+    .map((s) => ({ t: s.t, dur: s.dur, value: bars === 1 ? s.value[0] : s.value }))
+    .sort((a, b) => a.t - b.t || a.dur - b.dur);
+}
+
+// Parsing is a per-string cost, paid once. The scheduler runs inside a timer
+// several times a second and must never do this work; every line a shipped
+// mood holds is compiled at load, below the table, so by the time a bar is
+// asked for this is a map lookup.
+const compiled = new Map();
+export function parsePattern(str) {
+  let events = compiled.get(str);
+  if (!events) { events = compilePattern(str); compiled.set(str, events); }
+  return events;
+}
+
+// What an event plays on this repetition: a plain value, or the element the
+// alternation has walked round to.
+const valueAt = (v, bar) => (Array.isArray(v) ? v[((bar % v.length) + v.length) % v.length] : v);
+
 // The camp. Eight bars of finger-picked arpeggios — Am F C G, Am F Dm E —
-// each note a semitone offset from A2, slightly humanized in time and touch,
-// with a soft bass root swelling under each bar.
+// one line of notation each, eight even slots to the bar, every degree a
+// semitone offset from A2, slightly humanized in time and touch, with a soft
+// bass root swelling under each bar.
 const TOWN_FIGURE = [
-  [0, 7, 12, 15, 19, 15, 12, 7],     // Am
-  [-4, 3, 8, 12, 15, 12, 8, 3],      // F
-  [3, 10, 15, 19, 22, 19, 15, 10],   // C, an added sixth on top
-  [-2, 5, 10, 14, 17, 14, 10, 5],    // G
-  [0, 7, 12, 15, 19, 15, 12, 7],     // Am
-  [-4, 3, 8, 12, 15, 12, 8, 3],      // F
-  [5, 8, 12, 17, 20, 17, 12, 8],     // Dm
-  [-5, 2, 7, 11, 14, 11, 7, 2],      // E, the pull home
+  '0 7 12 15 19 15 12 7',       // Am
+  '-4 3 8 12 15 12 8 3',        // F
+  '3 10 15 19 22 19 15 10',     // C, an added sixth on top
+  '-2 5 10 14 17 14 10 5',      // G
+  '0 7 12 15 19 15 12 7',       // Am
+  '-4 3 8 12 15 12 8 3',        // F
+  '5 8 12 17 20 17 12 8',       // Dm
+  '-5 2 7 11 14 11 7 2',        // E, the pull home
 ];
 
-// The wilds wander a minor pentatonic with two notes over the octave; the dark
-// places lean on minor seconds and the tritone and go nowhere.
-const FIELD_SET = [0, 3, 5, 7, 10, 12, 15];
-const DARK_MOTIFS = [[0, 1, 0, -2], [3, 1, 0, 6], [0, 6, 5, 1], [12, 11, 6, 0]];
+// Act 1's dark places, the same four fragments as before. Each one drags
+// against the beat rather than sitting on it, so the beats are bracketed into
+// sixteenths and the notes placed inside them: beat 0.5, 1.25, 2, 2.75.
+const DARK_MOTIFS = [
+  '[~ ~ 0 ~] [~ 1 ~ ~] [0 ~ ~ -2] ~',
+  '[~ ~ 3 ~] [~ 1 ~ ~] [0 ~ ~ 6] ~',
+  '[~ ~ 0 ~] [~ 6 ~ ~] [5 ~ ~ 1] ~',
+  '[~ ~ 12 ~] [~ 11 ~ ~] [6 ~ ~ 0] ~',
+];
+
+// Lut Gholein, in D phrygian dominant — D Eb F# G A Bb C, the flat second and
+// the augmented step above it being the whole reason the mode is here. The
+// oud figure keeps that Eb away from its neighbours: it is always left by a
+// third or across a rest, never leant on.
+const OUD_FIGURE = [
+  '0 ~ [4 5] 7 ~ 5 4 ~',
+  '5 ~ [7 8] 10 ~ 8 7 ~',
+  '[0 4] 5 7 [8 7] 5 4 1 ~',
+  '4 1 ~ 0 ~ [7 5] 4 ~',
+];
+
+// Kurast, bright and quick an octave above the other towns — high enough that
+// the plucks come out struck, which is the marimba-ish voice the spec wants.
+// The three-element alternation in the last bar is deliberate: the figure is
+// four bars long, so a two-element one would land on the same side every time.
+const KURAST_FIGURE = [
+  '0 [4 7] 9 [7 4]',
+  '2 [7 9] 12 [9 7]',
+  '0 [4 7] 9 <12 14 16>',
+  '[9 7] 4 2 ~',
+];
+
+// Pandemonium's camp: one bell, then nothing, then one bell. There is no
+// figure here so much as an absence with two notes in it.
+const PANDEMONIUM_FIGURE = ['0 ~ ~ ~', '~ ~ ~ ~', '~ ~ 7 ~', '~ ~ ~ ~'];
+
+// Harrogath, bare fifths in the pad: root and fifth and the octave, nothing
+// in between to say whether it is major or minor.
+const HARROGATH_FIGURE = ['0 ~ 7 ~', '~ 12 ~ 7', '0 ~ 7 ~', '~ 5 ~ <0 7 12>'];
+
+// The dungeon motif tables, and the only material in the fifteen that leans
+// on a minor second or a tritone on purpose. Tombs toll slowly; the temple
+// answers itself across the bar; chaos stabs; the Worldstone keeps.
+const TOMB_MOTIFS = [
+  '0 ~ ~ ~ ~ ~ 1 ~',
+  '0 ~ ~ 6 ~ ~ ~ ~',
+  '-2 ~ ~ ~ 1 ~ ~ ~',
+  '6 ~ ~ ~ ~ 5 ~ ~',
+];
+const TEMPLE_MOTIFS = [
+  '0 ~ ~ ~ 6 ~ ~ ~',
+  '0 ~ 1 ~ ~ ~ ~ ~',
+  '~ ~ 6 ~ ~ ~ 7 ~',
+  '0 ~ ~ ~ ~ ~ 11 ~',
+];
+const CHAOS_MOTIFS = [
+  '0 6 ~ 0 6 ~ 12 ~',
+  '0 ~ 6 6 ~ 1 ~ ~',
+  '6 ~ 0 ~ 6 ~ [11 12] ~',
+  '0 1 6 ~ 0 1 6 ~',
+];
+const WORLDSTONE_MOTIFS = [
+  '0 ~ ~ ~ 6 ~ ~ ~',
+  '0 ~ ~ 11 ~ ~ ~ ~',
+  '-1 ~ ~ ~ ~ 6 ~ ~',
+  '0 ~ 6 ~ ~ ~ 12 ~',
+];
 
 // A mood is data. The engine below reads these fields and nothing else, so an
 // act's music is a table entry rather than a function of its own.
@@ -637,16 +837,20 @@ const DARK_MOTIFS = [[0, 1, 0, -2], [3, 1, 0, 6], [0, 6, 5, 1], [12, 11, 6, 0]];
 //   tempo, beats  a bar is `beats` beats at `tempo` to the minute
 //   root          Hz of semitone 0 for the melodic voice
 //   bars          bass root per bar, semitones from the bass voice's own root
-//   figure        exact melodic cells per bar, semitones; skips the improviser
-//   motifs        fragments a dark mood leans on instead of improvising
+//   figure        one line of notation per bar, or one for every bar; skips
+//                 the improviser
+//   motifs        lines a dark mood leans on instead of improvising, one drawn
+//                 at random every other bar
 //   scale, density, rest   the improviser: which notes, how many a bar (+-1),
 //                 and how often a bar falls silent
 //   voices        which primitive plays each part and how loud — lead, bass,
-//                 perc (a list of hits at beat offsets), colour (a rare event),
-//                 wind (one gust per bar)
+//                 perc (hit lines, each a pattern or a single beat offset),
+//                 colour (a rare event), wind (one gust per bar)
 export const MOODS = {
-  // The camp, note for note as it was, now on a plucked string rather than a
-  // triangle blip. The bass roots are the first note of each figure.
+  // ------------------------------------------------------------------ Act 1
+  // The camp, note for note as it was, now written as notation and played on
+  // a plucked string rather than a triangle blip. The bass roots are the first
+  // note of each figure.
   'a1.town': {
     tempo: 84, beats: 4, root: 110,
     bars: [0, -4, 3, -2, 0, -4, 5, -5],
@@ -656,16 +860,18 @@ export const MOODS = {
       bass: { kind: 'sine', root: 55, gain: 0.05, attack: 0.4 },
     },
   },
-  // The wilds. Mostly space: a few plucks wandering above a low pad every other
-  // bar, whole bars of rest, and wind where the drone used to sit.
+  // The wilds, re-cut to the spec: D dorian, sparse plucks over a pad that
+  // swells every other bar, whole bars of rest, wind where the drone used to
+  // sit. The lead runs D3 to D4, which is inside the string's range, so the
+  // notes are strings rather than struck stand-ins for them.
   'a1.field': {
-    tempo: 66, beats: 4, root: 220,
-    bars: [0, 3, -2],
-    scale: FIELD_SET, density: 3, rest: 0.22,
+    tempo: 66, beats: 4, root: 146.83,
+    bars: [0, 5, 3, -2],
+    scale: [0, 2, 3, 5, 7, 9, 10, 12], density: 3, rest: 0.22,
     voices: {
-      lead: { kind: 'pluck', gain: 0.06, dur: [0.8, 1.6], brightness: 2400 },
-      bass: { kind: 'pad', root: 55, gain: 0.03, attack: 0.6, filter: 700, every: 2, hold: 2 },
-      wind: { gain: 0.035 },
+      lead: { kind: 'pluck', gain: 0.11, dur: [0.8, 1.6], brightness: 2400 },
+      bass: { kind: 'pad', root: 73.42, gain: 0.04, attack: 0.6, filter: 700, every: 2, hold: 2 },
+      wind: { gain: 0.04 },
     },
   },
   // The dark places. A war drum on the bar, its echo uncertain; every other bar
@@ -679,20 +885,236 @@ export const MOODS = {
       lead: { kind: 'saw', gain: 0.05, dur: 0.96, filter: 620, attack: 0.03 },
       bass: { kind: 'pad', root: 82.41, gain: 0.035, attack: 0.9, filter: 520, every: 2, hold: 2 },
       perc: [
-        { kind: 'drum', at: 0, gain: 0.5 },
-        { kind: 'drum', at: 2.5, gain: 0.28, f0: 110, chance: 0.5 },
+        { kind: 'drum', pattern: 'x ~ ~ ~', gain: 0.5 },
+        { kind: 'drum', pattern: '~ ~ [~ x] ~', gain: 0.28, f0: 110, chance: 0.5 },
       ],
       colour: { chance: 0.12, kind: 'sine', freq: 1100, gain: 0.02, dur: 2.6, attack: 0.8, voices: 3, detune: 0.025 },
     },
   },
+
+  // ------------------------------------------------------------------ Act 2
+  // Lut Gholein. A bright oud figure in D phrygian dominant over a hand-drum
+  // cycle that falls 3-3-2 across the eight quavers, with a shaker filling the
+  // off-beats. The bass keeps to D, G and A — the flat second is the melody's
+  // to carry, never the harmony's.
+  'a2.town': {
+    tempo: 88, beats: 4, root: 146.83,
+    bars: [0, 5, 0, 7],
+    figure: OUD_FIGURE,
+    voices: {
+      lead: { kind: 'pluck', gain: 0.11, dur: 0.5, brightness: 2600 },
+      bass: { kind: 'sine', root: 73.42, gain: 0.045, attack: 0.35 },
+      perc: [
+        { kind: 'drum', pattern: 'x ~ ~ x ~ ~ x ~', gain: 0.3, f0: 180, f1: 70, dur: 0.35 },
+        { kind: 'shaker', pattern: '~ x ~ x ~ x ~ x', gain: 0.05, f0: 5200 },
+      ],
+    },
+  },
+  // The desert beyond the walls. Long pads, a phrase of plucks now and then,
+  // and wind carrying most of the bar. The draw is fourths and fifths only —
+  // no third to place it, which is what makes it read as distance.
+  'a2.field': {
+    tempo: 60, beats: 4, root: 146.83,
+    bars: [0, 5, 7, 0],
+    scale: [0, 5, 7, 10, 12], density: 2, rest: 0.4,
+    voices: {
+      lead: { kind: 'pluck', gain: 0.11, dur: [1, 1.9], brightness: 2000 },
+      bass: { kind: 'pad', root: 73.42, gain: 0.045, attack: 1.1, filter: 620, every: 2, hold: 2 },
+      wind: { gain: 0.045 },
+    },
+  },
+  // The tombs. Bell tolls four seconds apart over a pad too low and too slow
+  // to be a chord, one drum a bar when it comes at all, and the motifs are
+  // where the minor second lives.
+  'a2.dungeon': {
+    tempo: 52, beats: 4, root: 110,
+    bars: [0, -2],
+    motifs: TOMB_MOTIFS, motifChance: 0.85,
+    voices: {
+      lead: { kind: 'bell', gain: 0.09, dur: 3.4 },
+      bass: { kind: 'pad', root: 55, gain: 0.04, attack: 1.4, filter: 420, every: 2, hold: 2 },
+      perc: [{ kind: 'drum', pattern: 'x ~ ~ ~', gain: 0.36, f0: 120, f1: 40, dur: 0.7, chance: 0.75 }],
+      colour: { chance: 0.15, kind: 'sine', freq: 880, gain: 0.018, dur: 3.2, attack: 1.2, voices: 3, detune: 0.02 },
+    },
+  },
+
+  // ------------------------------------------------------------------ Act 3
+  // Kurast. The fastest of the fifteen and the highest: short bright plucks an
+  // octave above the other towns, which puts them over the string's ceiling and
+  // into the struck voice — the marimba the jungle wants. Shaker throughout,
+  // one drum on the bar with a kick-up before the next.
+  'a3.town': {
+    tempo: 92, beats: 4, root: 261.63,
+    bars: [0, 5, -3, 7],
+    figure: KURAST_FIGURE,
+    voices: {
+      lead: { kind: 'pluck', gain: 0.14, dur: 0.34, brightness: 3400 },
+      bass: { kind: 'sine', root: 65.41, gain: 0.06, attack: 0.3 },
+      perc: [
+        { kind: 'shaker', pattern: 'x [x x] x [x x]', gain: 0.06, f0: 6400 },
+        { kind: 'drum', pattern: 'x ~ ~ [~ x]', gain: 0.34, f0: 160, f1: 55, dur: 0.4 },
+      ],
+    },
+  },
+  // Upriver. Three drum lines on three different grids — eight, six, and a bar
+  // split unevenly — so nothing lines up twice in a row, and a high sine
+  // shimmer picking notes out of C dorian above them.
+  'a3.field': {
+    tempo: 80, beats: 4, root: 523.25,
+    bars: [0, 3, 5, 10],
+    scale: [0, 2, 3, 5, 7, 10, 12], density: 2, rest: 0.38,
+    voices: {
+      lead: { kind: 'sine', gain: 0.055, dur: [0.5, 1.1], filter: 3200, attack: 0.05 },
+      bass: { kind: 'pad', root: 65.41, gain: 0.05, attack: 0.9, filter: 560, every: 2, hold: 2 },
+      perc: [
+        { kind: 'drum', pattern: 'x ~ ~ x ~ ~ x ~', gain: 0.34, f0: 150, f1: 50, dur: 0.45 },
+        { kind: 'drum', pattern: '~ x ~ x ~ x', gain: 0.2, f0: 260, f1: 110, dur: 0.22 },
+        { kind: 'shaker', pattern: '[x x] x [x x x] x', gain: 0.045, f0: 5800 },
+      ],
+    },
+  },
+  // The temple. Gongs rather than bells — the same voice struck low, where its
+  // inharmonic partial reads as metal the size of a room — over a pad chanting
+  // a fifth below and a drum every six quavers.
+  'a3.dungeon': {
+    tempo: 54, beats: 4, root: 98,
+    bars: [0, -5],
+    motifs: TEMPLE_MOTIFS, motifChance: 0.85,
+    voices: {
+      lead: { kind: 'bell', gain: 0.095, dur: 3.6 },
+      bass: { kind: 'pad', root: 98, gain: 0.042, attack: 1.6, filter: 380, every: 2, hold: 2 },
+      perc: [{ kind: 'drum', pattern: 'x ~ ~ ~ ~ ~ x ~', gain: 0.4, f0: 130, f1: 42, dur: 0.85, chance: 0.85 }],
+      colour: { chance: 0.18, kind: 'sine', freq: 1320, gain: 0.016, dur: 3.4, attack: 1.4, voices: 3, detune: 0.03 },
+    },
+  },
+
+  // ------------------------------------------------------------------ Act 4
+  // Pandemonium. Nobody built this camp and nobody is glad to be in it: no
+  // drum, no colour, no warmth. A pad thin and high enough to be air rather
+  // than a chord, one bell, then two bars of nothing.
+  'a4.town': {
+    tempo: 56, beats: 4, root: 220,
+    bars: [0, 7],
+    figure: PANDEMONIUM_FIGURE,
+    voices: {
+      lead: { kind: 'bell', gain: 0.1, dur: 3.2 },
+      bass: { kind: 'pad', root: 220, gain: 0.03, attack: 1.8, filter: 1500, detune: 0.004, every: 2, hold: 2 },
+      wind: { gain: 0.022 },
+    },
+  },
+  // The plains of despair. Five beats to the bar, and a drum that falls 3-3-2
+  // across eight slots of it, so the stride never resolves. One note a bar and
+  // half the bars empty — the sparsest thing in the score. The pad's detune is
+  // wide enough to beat against itself, which is where the sourness comes from;
+  // nothing here is written as a clash.
+  'a4.field': {
+    tempo: 54, beats: 5, root: 130.81,
+    bars: [0, 8, 3],
+    scale: [0, 3, 7, 10, 12], density: 1, rest: 0.5,
+    voices: {
+      lead: { kind: 'pluck', gain: 0.12, dur: [1.2, 2.2], brightness: 1500 },
+      bass: { kind: 'pad', root: 65.41, gain: 0.042, attack: 2, filter: 460, detune: 0.02, every: 2, hold: 2 },
+      perc: [{ kind: 'drum', pattern: 'x ~ ~ x ~ ~ x ~', gain: 0.42, f0: 110, f1: 38, dur: 0.9, chance: 0.8 }],
+      wind: { gain: 0.03 },
+    },
+  },
+  // Chaos. The fastest tempo in the score and the only mood with no sustaining
+  // voice at all — no pad, no bell, nothing held. Two drum lines interlocking
+  // through the bar and, every other bar, a fistful of tritone stabs.
+  'a4.dungeon': {
+    tempo: 92, beats: 4, root: 87.31,
+    motifs: CHAOS_MOTIFS, motifChance: 0.9,
+    voices: {
+      lead: { kind: 'saw', gain: 0.09, dur: 0.28, filter: 800, attack: 0.006 },
+      perc: [
+        { kind: 'drum', pattern: 'x ~ x x ~ x x ~', gain: 0.42, f0: 150, f1: 48, dur: 0.3 },
+        { kind: 'drum', pattern: '~ x ~ ~ x ~ ~ x', gain: 0.24, f0: 240, f1: 100, dur: 0.16 },
+      ],
+    },
+  },
+
+  // ------------------------------------------------------------------ Act 5
+  // Harrogath. The pad is the melody here: root, fifth, octave and nothing in
+  // between, so the mode never declares itself. Under it a slow drum on the
+  // bar, and over it a saw swell with a slow attack, which is as close to a
+  // horn as three detuned oscillators get.
+  'a5.town': {
+    tempo: 62, beats: 4, root: 146.83,
+    bars: [0, 0, 5, 7],
+    figure: HARROGATH_FIGURE,
+    voices: {
+      lead: { kind: 'pad', gain: 0.05, dur: 2.2, attack: 0.5, filter: 900, detune: 0.005 },
+      bass: { kind: 'pad', root: 73.42, gain: 0.05, attack: 1, filter: 520, every: 2, hold: 2 },
+      perc: [{ kind: 'drum', pattern: 'x ~ ~ ~', gain: 0.36, f0: 125, f1: 42, dur: 0.8 }],
+      colour: { chance: 0.5, kind: 'saw', freq: 196, gain: 0.05, dur: 2.4, attack: 0.9, filter: 800, voices: 3, detune: 0.008 },
+    },
+  },
+  // The frozen tundra. Wind, and fifths falling out of it — the draw holds no
+  // interval smaller than a fourth, so there is nothing warm for the ear to
+  // settle on. Colder than Act 2's desert, warmer than Act 4's plains, which
+  // is the order the acts want.
+  'a5.field': {
+    tempo: 58, beats: 4, root: 146.83,
+    bars: [0, 7, 0, 5],
+    scale: [-5, 0, 5, 7, 12], density: 2, rest: 0.4,
+    voices: {
+      lead: { kind: 'pluck', gain: 0.11, dur: [1, 2], brightness: 1800 },
+      bass: { kind: 'pad', root: 73.42, gain: 0.042, attack: 1.3, filter: 500, every: 2, hold: 2 },
+      wind: { gain: 0.045 },
+    },
+  },
+  // The Worldstone Keep. The biggest drum in the score, a pad low enough to be
+  // a choir humming rather than singing, and bells over the top of both.
+  'a5.dungeon': {
+    tempo: 58, beats: 4, root: 110,
+    bars: [0, -5],
+    motifs: WORLDSTONE_MOTIFS, motifChance: 0.85,
+    voices: {
+      lead: { kind: 'bell', gain: 0.1, dur: 3.6 },
+      bass: { kind: 'pad', root: 55, gain: 0.05, attack: 1.5, filter: 400, every: 2, hold: 2 },
+      perc: [
+        { kind: 'drum', pattern: 'x ~ ~ ~ ~ ~ x ~', gain: 0.5, f0: 150, f1: 40, dur: 1 },
+        { kind: 'drum', pattern: '~ ~ ~ x ~ ~ ~ ~', gain: 0.28, f0: 190, f1: 70, dur: 0.5, chance: 0.6 },
+      ],
+      colour: { chance: 0.2, kind: 'bell', freq: 660, gain: 0.03, dur: 3, voices: 2, detune: 0.01 },
+    },
+  },
 };
 
-// Acts 2 to 5 have no music of their own yet. Every key has to render, so each
-// one points at the matching Act 1 mood in the meantime.
-for (const act of ['a2', 'a3', 'a4', 'a5']) {
-  MOODS[`${act}.town`] = MOODS['a1.town'];          // placeholder, Task 2 replaces
-  MOODS[`${act}.field`] = MOODS['a1.field'];        // placeholder, Task 2 replaces
-  MOODS[`${act}.dungeon`] = MOODS['a1.dungeon'];    // placeholder, Task 2 replaces
+// Every line the fifteen hold, compiled now rather than on the bar that first
+// reaches it. Two things come of doing it here: the scheduler's timer only
+// ever does a map lookup, and a malformed line in a shipped table says so at
+// load, where it is a table bug, instead of halfway through an act.
+for (const m of Object.values(MOODS)) {
+  const lines = [];
+  if (typeof m.figure === 'string') lines.push(m.figure);
+  if (Array.isArray(m.figure)) lines.push(...m.figure);
+  if (Array.isArray(m.motifs)) lines.push(...m.motifs);
+  for (const hit of Array.isArray(m.voices?.perc) ? m.voices.perc : []) {
+    if (typeof hit.pattern === 'string') lines.push(hit.pattern);
+  }
+  for (const line of lines) if (typeof line === 'string') parsePattern(line);
+}
+
+// One written line, as degrees placed in beats from the start of the bar.
+// Notation is the only thing a figure or a motif may be; anything else is a
+// table bug, and it costs the bar rather than the music.
+function lineCells(m, key, line, barIndex) {
+  if (typeof line !== 'string') {
+    once(`synth: mood "${key}" writes a melodic line that is not notation, so the bar is empty`);
+    return [];
+  }
+  const cells = [];
+  for (const e of parsePattern(line)) {
+    const s = valueAt(e.value, barIndex);
+    if (s === null) continue;
+    if (typeof s !== 'number') {
+      once(`synth: mood "${key}" writes a percussion hit into a melodic line, which has no pitch`);
+      continue;
+    }
+    cells.push({ s, at: e.t * m.beats });
+  }
+  return cells;
 }
 
 // What the lead plays this bar: a written figure, a motif fragment, or a walk
@@ -701,22 +1123,13 @@ for (const act of ['a2', 'a3', 'a4', 'a5']) {
 // figure, motif or scale hands back an empty bar and one line of console,
 // never a throw — this runs inside the scheduler's timer.
 function cellsFor(m, key, barIndex) {
-  if (Array.isArray(m.figure) && m.figure.length) {
-    const f = m.figure[barIndex % m.figure.length];
-    if (!Array.isArray(f)) {
-      once(`synth: mood "${key}" has a figure bar that is not a list of degrees, so the bar is empty`);
-      return [];
-    }
-    return f.map((s, i) => ({ s, at: i * (m.beats / f.length) }));
+  if (m.figure) {
+    const line = Array.isArray(m.figure) ? m.figure[barIndex % m.figure.length] : m.figure;
+    return lineCells(m, key, line, barIndex);
   }
   if (Array.isArray(m.motifs) && m.motifs.length) {
     if (barIndex % 2 || rand(0, 1) > (m.motifChance ?? 0.75)) return [];
-    const motif = m.motifs[Math.floor(rand(0, m.motifs.length))];
-    if (!Array.isArray(motif)) {
-      once(`synth: mood "${key}" has a motif that is not a list of degrees, so the bar is empty`);
-      return [];
-    }
-    return motif.map((s, i) => ({ s, at: 0.5 + i * 0.75 }));
+    return lineCells(m, key, m.motifs[Math.floor(rand(0, m.motifs.length))], barIndex);
   }
   if (rand(0, 1) < (m.rest || 0)) return [];
   if (!Array.isArray(m.scale) || !m.scale.length) {
@@ -795,6 +1208,18 @@ export function scheduleBar(ctx, bus, key, barIndex, t) {
     if (hit.chance !== undefined && rand(0, 1) > hit.chance) continue;
     const strike = voice(PERC, hit.kind);
     if (!strike || !partCheck(key, 'perc', hit)) continue;
+    if (typeof hit.pattern === 'string') {
+      for (const e of parsePattern(hit.pattern)) {
+        const val = valueAt(e.value, barIndex);
+        if (val === null) continue;
+        if (val !== 'x') {
+          once(`synth: mood "${key}" writes a degree into a percussion line, which has no pitches`);
+          continue;
+        }
+        strike(ctx, bus, t + barLen * e.t, hit);
+      }
+      continue;
+    }
     // A hit with no written offset lands on the downbeat, not at NaN.
     const at = Number.isFinite(hit.at) && hit.at > 0 ? hit.at : 0;
     strike(ctx, bus, t + beat * at, hit);
@@ -863,7 +1288,7 @@ export function playMusic(key) {
   stopMusic();
   if (!key || muted || !MOODS[key]) return;
   const bus = actx.createGain();
-  bus.gain.value = 1;
+  bus.gain.value = MUSIC_LEVEL;
   bus.connect(master);
   const state = { key, bus, bar: 0, nextTime: actx.currentTime + 0.15, timer: 0 };
   const tick = () => {
@@ -900,7 +1325,7 @@ export function renderMood(key, seconds = 8) {
   const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   const octx = new OAC(1, Math.ceil(22050 * seconds), 22050);
   const obus = octx.createGain();
-  obus.gain.value = MASTER;                  // what the live master would apply
+  obus.gain.value = MASTER * MUSIC_LEVEL;    // what the live bus and master would apply
   obus.connect(octx.destination);
   let t = 0;
   for (let bar = 0; t < seconds; bar++) t += scheduleBar(octx, obus, key, bar, t);
