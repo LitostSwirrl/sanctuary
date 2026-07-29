@@ -14,7 +14,7 @@
 - **Task 5 — Leap and Whirlwind**: done (2026-07-29, commit 47df38b)
 - **Task 6 — Monster status + Warcries**: done (2026-07-29, commit 8b8fb6b)
 - **Task 7 — Masteries**: done (2026-07-29, commit e202576)
-- **Task 8 — Verification contract (ship gate)**: pending
+- **Task 8 — Verification contract (ship gate)**: done (2026-07-29, commits f72d45e/9975586/4353c5f — 7/8 outright, cold bake adjudicated pre-existing)
 - **Task 9 — Nightmare (STRETCH, only after Task 8 green)**: pending
 
 Execution mode: **subagent-driven** (decided 2026-07-29). First execution resume prompt below.
@@ -99,6 +99,14 @@ Execution mode: **subagent-driven** (decided 2026-07-29). First execution resume
 **Why**: Masteries make the character sheet honest — the bonus appears only while the matching weapon kind is held, and the last inert Task 2 fields now carry real values. Bonus find: the implementer root-caused the pre-existing vendor crash (buy handler reads `this.vendorStock`; named-NPC stock lives on `npc.stock`; the purchase completes before the throw) — on the ledger for Task 8/final triage, untouched here.
 
 **Next**: Task 8 (the verification contract — ship gate; 450ms cold-bake adjudication lives there).
+
+### Task 8 — The verification contract (2026-07-29)
+
+**What**: All eight ship-gate checks run end-to-end in a real browser against serve.js — real PointerEvent/KeyboardEvent dispatch at computed canvas coordinates, production castSkill/allocate paths, atomic scripts, console read after every check. Seven pass outright. Check 6's cold bake measured 570-598ms vs the 450ms gate and was adjudicated by the controller: Task 1's bisect shows 557-561ms WITHOUT the Barbarian on this machine, so the miss predates the work (his marginal ~25-30ms is proportionate); the Whirlwind-active p95 (3.8ms, 51-entity scene) passes independently. The sweep hit the pre-existing vendor buy crash while purchasing mastery-test weapons and fixed it minimally (f72d45e — the buy handler now reads the stock holder the NPC actually carries, mirroring vendorStockList). Verification record written to README/progress.md (9975586), then corrected after task review (4353c5f): the status table now says 7/8 honestly, the README synergy claim matches the code, and check 7's "open diablo.html from disk" was established literally via a headless-Chromium Playwright driver once claude-in-chrome refused file:// — protocol 'file:', fresh Barbarian, 300 frames, a real Bash swing, zero console messages. Review: Needs fixes (3 Important, all in the written deliverables), one fix round, then all findings ADDRESSED with no new breakage.
+
+**Why**: This is the spec's ship gate — the class ships only on observed behavior, and the record now states what was measured, not a bare pass.
+
+**Next**: Final whole-branch review (c9ff6c1..HEAD on the most capable model, pointed at the ledger's deferred minors and parked rulings), then finishing-a-development-branch; Task 9 (Nightmare) strictly per its gate.
 
 ---
 
