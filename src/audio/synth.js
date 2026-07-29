@@ -55,6 +55,18 @@ function makeNoise(ctx, seconds) {
   return buf;
 }
 
+// A buffer belongs to the context that made it, so the offline context used for
+// measurement cannot borrow the live one's noise. The live buffer is built once
+// by init(); anything else gets its own, cached so a render does not rebuild it
+// per note.
+const noiseBuffers = new WeakMap();
+function noiseBufferFor(ctx) {
+  if (ctx === actx) return noiseBuffer;
+  let buf = noiseBuffers.get(ctx);
+  if (!buf) { buf = makeNoise(ctx, 1.6); noiseBuffers.set(ctx, buf); }
+  return buf;
+}
+
 const rand = (a, b) => a + Math.random() * (b - a);
 
 // A burst of noise through a filter: impacts, whooshes, most physical sounds.
@@ -62,7 +74,7 @@ function noise(o = {}) {
   if (!actx || muted) return;
   const t = actx.currentTime;
   const src = actx.createBufferSource();
-  src.buffer = noiseBuffer;
+  src.buffer = noiseBufferFor(actx);
   src.playbackRate.value = o.rate || 1;
 
   const filt = actx.createBiquadFilter();
@@ -214,33 +226,39 @@ export function sfx(name, opts = {}) {
 
 // ------------------------------------------------------------------- music
 //
-// Looping background music, composed at runtime from the same oscillator
-// primitives as the effects — no audio files, nothing stored. Three moods:
-// the camp gets quiet plucked arpeggios in A minor, the wilds an airy
-// wandering line above the drone, the dungeons a slow war drum under
-// dissonant fragments. A timer keeps ~1.5 s of notes scheduled ahead of the
-// clock, so a stalled frame never tears the music.
+// Looping background music, composed at runtime from the same node vocabulary
+// as the effects — no audio files, nothing stored. One scheduler engine reads a
+// table of moods, three per act: the camp, the wilds, the dark places. A timer
+// keeps ~1.5 s of notes scheduled ahead of the clock, so a stalled frame never
+// tears the music.
+//
+// Every voice below is scheduled against a context handed in rather than the
+// module's live one. That is what lets the same engine render a mood into an
+// OfflineAudioContext and be measured, instead of only listened to.
 
-let music = null;          // { mode, bus, bar, nextTime, timer }
+let music = null;          // { key, bus, bar, nextTime, timer }
 const LOOKAHEAD = 1.5;     // seconds of notes kept scheduled ahead
 const MUSIC_TICK = 300;    // ms between scheduler passes
 
 const semiF = (root, s) => root * Math.pow(2, s / 12);
 
+// A number, or a [low, high] range to draw from. Moods use both.
+const pick = (v) => (Array.isArray(v) ? rand(v[0], v[1]) : v);
+
 // One scheduled voice at an absolute time, routed through the music bus so a
 // mode change can fade everything it scheduled with one ramp.
-function mnote(bus, when, freq, o = {}) {
-  const osc = actx.createOscillator();
+function mnote(ctx, bus, when, freq, o = {}) {
+  const osc = ctx.createOscillator();
   osc.type = o.type || 'triangle';
   osc.frequency.value = freq;
-  const g = actx.createGain();
+  const g = ctx.createGain();
   const dur = o.dur || 0.5;
   g.gain.setValueAtTime(0, when);
   g.gain.linearRampToValueAtTime(o.gain ?? 0.08, when + (o.attack ?? 0.006));
   g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
   let node = osc;
   if (o.filter) {
-    const f = actx.createBiquadFilter();
+    const f = ctx.createBiquadFilter();
     f.type = 'lowpass';
     f.frequency.value = o.filter;
     osc.connect(f); node = f;
@@ -251,15 +269,15 @@ function mnote(bus, when, freq, o = {}) {
 }
 
 // A deep drum hit: filtered noise falling into the floor.
-function mthump(bus, when, o = {}) {
-  const src = actx.createBufferSource();
-  src.buffer = noiseBuffer;
-  const filt = actx.createBiquadFilter();
+function mthump(ctx, bus, when, o = {}) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBufferFor(ctx);
+  const filt = ctx.createBiquadFilter();
   filt.type = 'lowpass';
   filt.frequency.setValueAtTime(o.f0 || 140, when);
   filt.frequency.exponentialRampToValueAtTime(o.f1 || 45, when + (o.dur || 0.5));
   filt.Q.value = 0.8;
-  const g = actx.createGain();
+  const g = ctx.createGain();
   g.gain.setValueAtTime(0, when);
   g.gain.linearRampToValueAtTime(o.gain ?? 0.5, when + 0.008);
   g.gain.exponentialRampToValueAtTime(0.0001, when + (o.dur || 0.5));
@@ -268,10 +286,150 @@ function mthump(bus, when, o = {}) {
   src.stop(when + (o.dur || 0.5) + 0.05);
 }
 
+// A plucked string: a millisecond of noise into a feedback delay whose loop
+// carries a lowpass, so each pass around the loop dulls — Karplus-Strong.
+// loopHz sets pitch (delay = 1/loopHz), brightness the loop filter cutoff.
+function pluck(ctx, bus, when, freq, o = {}) {
+  const dur = o.dur || 1.2;
+  const burst = ctx.createBufferSource();
+  burst.buffer = noiseBufferFor(ctx);
+  const bg = ctx.createGain();
+  bg.gain.setValueAtTime(1, when);
+  bg.gain.setValueAtTime(0, when + 1 / freq);  // one period of noise seeds the loop
+  const delay = ctx.createDelay(1);
+  delay.delayTime.value = 1 / freq;
+  const damp = ctx.createBiquadFilter();
+  damp.type = 'lowpass';
+  damp.frequency.value = o.brightness || 2600;
+  // A lowpass reads its Q in decibels, and the default of 1 is +1 dB: at the
+  // cutoff the filter hands back 1.12 of what it was given. Around a feedback
+  // loop that beats the 0.985 below it, so every pass is louder than the last
+  // and the string screams instead of ringing — measured at a peak of 2.7e11
+  // before this line existed. -3.01 dB is the flat Butterworth response, the
+  // only setting that holds the loop under unity at every frequency.
+  damp.Q.value = -3.0103;
+  const fb = ctx.createGain();
+  const sustain = o.sustain ?? 0.985;          // loop gain < 1 or it rings forever
+  fb.gain.setValueAtTime(sustain, when);
+  const out = ctx.createGain();
+  out.gain.setValueAtTime(o.gain ?? 0.16, when);
+  out.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+  burst.connect(bg); bg.connect(delay);
+  delay.connect(damp); damp.connect(fb); fb.connect(delay);   // the loop
+  delay.connect(out); out.connect(bus);
+  burst.start(when); burst.stop(when + 0.05);
+  // Feedback loops outlive their sources: the burst is long gone while the
+  // delay keeps recirculating, so a live context would collect one running loop
+  // per note until the bus is torn down. Open the loop as the note ends, then
+  // cut it off the bus so it can be collected. An offline render just ends.
+  fb.gain.setValueAtTime(sustain, when + dur * 0.8);
+  fb.gain.linearRampToValueAtTime(0, when + dur);
+  if (ctx === actx) {
+    setTimeout(() => { try { out.disconnect(); } catch { /* already gone */ } },
+      Math.max(0, when - ctx.currentTime + dur + 0.2) * 1000);
+  }
+}
+
+// A slab of sound with no attack to speak of: three detuned saws under a
+// lowpass, swelling in and decaying out across whole bars.
+function pad(ctx, bus, when, freq, o = {}) {
+  const dur = o.dur || 4;
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.value = o.filter || 800;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.linearRampToValueAtTime(o.gain ?? 0.04, when + Math.max(0.4, o.attack ?? 0.6));
+  g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+  filt.connect(g); g.connect(bus);
+  for (let i = 0; i < 3; i++) {
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = freq * (1 + (i - 1) * (o.detune ?? 0.006));
+    osc.connect(filt);
+    osc.start(when);
+    osc.stop(when + dur + 0.05);
+  }
+}
+
+// A struck bell: two sines at an inharmonic ratio, which is what stops it
+// sounding like a flute. The upper partial fades first, as metal does.
+function bell(ctx, bus, when, freq, o = {}) {
+  const dur = Math.max(2, o.dur ?? 3.2);
+  [1, 2.76].forEach((ratio, i) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq * ratio;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime((o.gain ?? 0.06) * (i ? 0.45 : 1), when + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur * (i ? 0.6 : 1));
+    osc.connect(g); g.connect(bus);
+    osc.start(when);
+    osc.stop(when + dur + 0.05);
+  });
+}
+
+// The tight end of the percussion: a hiss of bandpassed noise, gone in a
+// twentieth of a second.
+function shaker(ctx, bus, when, o = {}) {
+  const dur = Math.min(o.dur ?? 0.06, 0.08);
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBufferFor(ctx);
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'bandpass';
+  filt.frequency.value = o.f0 || 6200;
+  filt.Q.value = o.q ?? 2.4;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(o.gain ?? 0.06, when + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+  src.connect(filt); filt.connect(g); g.connect(bus);
+  src.start(when, rand(0, 0.6));
+  src.stop(when + dur + 0.02);
+}
+
+// Air moving: noise under a lowpass an LFO walks between roughly 200 and 900
+// Hz. It does the atmospheric work the old drone did, without a fixed pitch to
+// hum, and it is scheduled one gust per bar — never free-running, so nothing it
+// starts can survive a change of area.
+function wind(ctx, bus, when, dur, o = {}) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBufferFor(ctx);
+  src.loop = true;
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.value = rand(500, 600);
+  filt.Q.value = 0.9;
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = rand(0.06, 0.16);
+  const lg = ctx.createGain();
+  lg.gain.value = 300;                    // centre +- this, so 200 Hz to 900 Hz
+  lfo.connect(lg); lg.connect(filt.frequency);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(Math.min(o.gain ?? 0.035, 0.05), when + dur * 0.4);
+  g.gain.linearRampToValueAtTime(0, when + dur);
+  src.connect(filt); filt.connect(g); g.connect(bus);
+  src.start(when, rand(0, 0.6)); src.stop(when + dur);
+  lfo.start(when); lfo.stop(when + dur);
+}
+
+// What a mood may name as a voice. Pitched voices all take the same arguments,
+// so a mood picks one by name and the engine does not care which.
+const PITCHED = {
+  pluck,
+  pad,
+  bell,
+  sine: (ctx, bus, when, freq, o) => mnote(ctx, bus, when, freq, { ...o, type: 'sine' }),
+  saw: (ctx, bus, when, freq, o) => mnote(ctx, bus, when, freq, { ...o, type: 'sawtooth' }),
+};
+const PERC = { drum: mthump, shaker };
+
 // The camp. Eight bars of finger-picked arpeggios — Am F C G, Am F Dm E —
 // each note a semitone offset from A2, slightly humanized in time and touch,
 // with a soft bass root swelling under each bar.
-const TOWN_BARS = [
+const TOWN_FIGURE = [
   [0, 7, 12, 15, 19, 15, 12, 7],     // Am
   [-4, 3, 8, 12, 15, 12, 8, 3],      // F
   [3, 10, 15, 19, 22, 19, 15, 10],   // C, an added sixth on top
@@ -282,74 +440,163 @@ const TOWN_BARS = [
   [-5, 2, 7, 11, 14, 11, 7, 2],      // E, the pull home
 ];
 
-function scheduleTown(bus, t, bar) {
-  const eighth = 60 / 84 / 2;
-  const semis = TOWN_BARS[bar % TOWN_BARS.length];
-  semis.forEach((s, i) => {
-    mnote(bus, t + i * eighth + rand(-0.006, 0.01), semiF(110, s),
-      { gain: 0.085 * rand(0.8, 1.15), dur: 0.55, filter: 1900 });
-  });
-  mnote(bus, t, semiF(55, semis[0]), { type: 'sine', gain: 0.05, dur: eighth * 8, attack: 0.4 });
-  return eighth * 8;
-}
-
-// The wilds. Mostly space: a few soft sine tones wandering a minor
-// pentatonic above the drone, a low pad every other bar, whole bars of rest.
+// The wilds wander a minor pentatonic with two notes over the octave; the dark
+// places lean on minor seconds and the tritone and go nowhere.
 const FIELD_SET = [0, 3, 5, 7, 10, 12, 15];
-
-function scheduleField(bus, t, bar) {
-  const beat = 60 / 66;
-  if (bar % 2 === 0) {
-    mnote(bus, t, semiF(55, [0, 3, -2][(bar / 2) % 3]), { type: 'sine', gain: 0.04, dur: beat * 8, attack: 0.6 });
-  }
-  if (rand(0, 1) < 0.22) return beat * 4;
-  const n = 2 + Math.floor(rand(0, 3));
-  for (let i = 0; i < n; i++) {
-    mnote(bus, t + Math.floor(rand(0, 8)) * (beat / 2), semiF(220, FIELD_SET[Math.floor(rand(0, FIELD_SET.length))]),
-      { type: 'sine', gain: 0.055 * rand(0.7, 1.2), dur: rand(0.8, 1.6), attack: 0.05, filter: 2400 });
-  }
-  return beat * 4;
-}
-
-// The dungeons. A war drum on the bar, its echo uncertain; every other bar a
-// low sawtooth fragment leaning on minor seconds and the tritone; rarely, a
-// high shimmer that takes seconds to fade.
 const DARK_MOTIFS = [[0, 1, 0, -2], [3, 1, 0, 6], [0, 6, 5, 1], [12, 11, 6, 0]];
 
-function scheduleDungeon(bus, t, bar) {
-  const beat = 60 / 56;
-  mthump(bus, t, { gain: 0.5 });
-  if (rand(0, 1) < 0.5) mthump(bus, t + beat * 2.5, { gain: 0.28, f0: 110 });
-  if (bar % 2 === 0 && rand(0, 1) < 0.75) {
-    const motif = DARK_MOTIFS[Math.floor(rand(0, DARK_MOTIFS.length))];
-    motif.forEach((s, i) => {
-      mnote(bus, t + beat * (0.5 + i * 0.75), semiF(82.41, s),
-        { type: 'sawtooth', gain: 0.05, dur: beat * 0.9, filter: 620, attack: 0.03 });
-    });
-  }
-  if (rand(0, 1) < 0.12) {
-    for (let v = 0; v < 3; v++) {
-      mnote(bus, t + rand(0, beat), 1100 * (1 + (v - 1) * 0.025), { type: 'sine', gain: 0.02, dur: 2.6, attack: 0.8 });
-    }
-  }
-  return beat * 4;
+// A mood is data. The engine below reads these fields and nothing else, so an
+// act's music is a table entry rather than a function of its own.
+//
+//   tempo, beats  a bar is `beats` beats at `tempo` to the minute
+//   root          Hz of semitone 0 for the melodic voice
+//   bars          bass root per bar, semitones from the bass voice's own root
+//   figure        exact melodic cells per bar, semitones; skips the improviser
+//   motifs        fragments a dark mood leans on instead of improvising
+//   scale, density, rest   the improviser: which notes, how many a bar (+-1),
+//                 and how often a bar falls silent
+//   voices        which primitive plays each part and how loud — lead, bass,
+//                 perc (a list of hits at beat offsets), colour (a rare event),
+//                 wind (one gust per bar)
+export const MOODS = {
+  // The camp, note for note as it was, now on a plucked string rather than a
+  // triangle blip. The bass roots are the first note of each figure.
+  'a1.town': {
+    tempo: 84, beats: 4, root: 110,
+    bars: [0, -4, 3, -2, 0, -4, 5, -5],
+    figure: TOWN_FIGURE,
+    voices: {
+      lead: { kind: 'pluck', gain: 0.09, dur: 0.55, brightness: 1900 },
+      bass: { kind: 'sine', root: 55, gain: 0.05, attack: 0.4 },
+    },
+  },
+  // The wilds. Mostly space: a few plucks wandering above a low pad every other
+  // bar, whole bars of rest, and wind where the drone used to sit.
+  'a1.field': {
+    tempo: 66, beats: 4, root: 220,
+    bars: [0, 3, -2],
+    scale: FIELD_SET, density: 3, rest: 0.22,
+    voices: {
+      lead: { kind: 'pluck', gain: 0.06, dur: [0.8, 1.6], brightness: 2400 },
+      bass: { kind: 'pad', root: 55, gain: 0.03, attack: 0.6, filter: 700, every: 2, hold: 2 },
+      wind: { gain: 0.035 },
+    },
+  },
+  // The dark places. A war drum on the bar, its echo uncertain; every other bar
+  // a low sawtooth fragment; rarely, a high shimmer that takes seconds to fade.
+  // The pad underneath does what the drone did, except that it moves.
+  'a1.dungeon': {
+    tempo: 56, beats: 4, root: 82.41,
+    bars: [0, -2],
+    motifs: DARK_MOTIFS, motifChance: 0.75,
+    voices: {
+      lead: { kind: 'saw', gain: 0.05, dur: 0.96, filter: 620, attack: 0.03 },
+      bass: { kind: 'pad', root: 82.41, gain: 0.035, attack: 0.9, filter: 520, every: 2, hold: 2 },
+      perc: [
+        { kind: 'drum', at: 0, gain: 0.5 },
+        { kind: 'drum', at: 2.5, gain: 0.28, f0: 110, chance: 0.5 },
+      ],
+      colour: { chance: 0.12, kind: 'sine', freq: 1100, gain: 0.02, dur: 2.6, attack: 0.8, voices: 3, detune: 0.025 },
+    },
+  },
+};
+
+// Acts 2 to 5 have no music of their own yet. Every key has to render, so each
+// one points at the matching Act 1 mood in the meantime.
+for (const act of ['a2', 'a3', 'a4', 'a5']) {
+  MOODS[`${act}.town`] = MOODS['a1.town'];          // placeholder, Task 2 replaces
+  MOODS[`${act}.field`] = MOODS['a1.field'];        // placeholder, Task 2 replaces
+  MOODS[`${act}.dungeon`] = MOODS['a1.dungeon'];    // placeholder, Task 2 replaces
 }
 
-const MUSIC_MODES = { town: scheduleTown, field: scheduleField, dungeon: scheduleDungeon };
+// What the lead plays this bar: a written figure, a motif fragment, or a walk
+// over the scale. Positions come back in beats from the start of the bar.
+function cellsFor(m, barIndex) {
+  if (m.figure) {
+    const f = m.figure[barIndex % m.figure.length];
+    return f.map((s, i) => ({ s, at: i * (m.beats / f.length) }));
+  }
+  if (m.motifs) {
+    if (barIndex % 2 || rand(0, 1) > (m.motifChance ?? 0.75)) return [];
+    const motif = m.motifs[Math.floor(rand(0, m.motifs.length))];
+    return motif.map((s, i) => ({ s, at: 0.5 + i * 0.75 }));
+  }
+  if (rand(0, 1) < (m.rest || 0)) return [];
+  const cells = [];
+  const n = m.density + Math.floor(rand(0, 3)) - 1;
+  for (let i = 0; i < n; i++) {
+    cells.push({
+      s: m.scale[Math.floor(rand(0, m.scale.length))],
+      at: Math.floor(rand(0, m.beats * 2)) * 0.5,
+    });
+  }
+  return cells;
+}
 
-export function playMusic(mode) {
+// One bar of one mood, scheduled against whichever context is passed in — the
+// live one for playback, an offline one for measurement — and returning the
+// seconds it occupies, so the caller only has to keep adding.
+export function scheduleBar(ctx, bus, key, barIndex, t) {
+  const m = MOODS[key];
+  if (!m) return 1;
+  const beat = 60 / m.tempo;
+  const barLen = beat * m.beats;
+  const v = m.voices;
+
+  if (v.wind) wind(ctx, bus, t, barLen, v.wind);
+
+  if (v.bass) {
+    const every = v.bass.every || 1;
+    if (barIndex % every === 0) {
+      const chord = m.bars[Math.floor(barIndex / every) % m.bars.length];
+      PITCHED[v.bass.kind](ctx, bus, t, semiF(v.bass.root, chord),
+        { ...v.bass, dur: barLen * (v.bass.hold || 1) });
+    }
+  }
+
+  for (const hit of v.perc || []) {
+    if (hit.chance !== undefined && rand(0, 1) > hit.chance) continue;
+    PERC[hit.kind](ctx, bus, t + beat * hit.at, hit);
+  }
+
+  if (v.lead) {
+    const play = PITCHED[v.lead.kind];
+    for (const c of cellsFor(m, barIndex)) {
+      // A player pushes and drags against the beat, so each note lands a few
+      // milliseconds off it. Dragging the first note of the first bar backwards
+      // would ask for a negative time, which the API refuses — live playback
+      // starts a fifth of a second ahead and never sees it, an offline render
+      // starting at zero does.
+      const when = Math.max(0, t + beat * c.at + rand(-0.006, 0.01));
+      play(ctx, bus, when, semiF(m.root, c.s),
+        { ...v.lead, gain: v.lead.gain * rand(0.8, 1.15), dur: pick(v.lead.dur) });
+    }
+  }
+
+  const col = v.colour;
+  if (col && rand(0, 1) < col.chance) {
+    const n = col.voices || 1;
+    for (let i = 0; i < n; i++) {
+      PITCHED[col.kind](ctx, bus, t + rand(0, beat),
+        col.freq * (1 + (i - (n - 1) / 2) * (col.detune || 0)), col);
+    }
+  }
+
+  return barLen;
+}
+
+export function playMusic(key) {
   if (!actx) return;
-  if (music && music.mode === mode) return;
+  if (music && music.key === key) return;
   stopMusic();
-  if (!mode || muted || !MUSIC_MODES[mode]) return;
+  if (!key || muted || !MOODS[key]) return;
   const bus = actx.createGain();
   bus.gain.value = 1;
   bus.connect(master);
-  const state = { mode, bus, bar: 0, nextTime: actx.currentTime + 0.15, timer: 0 };
-  const scheduler = MUSIC_MODES[mode];
+  const state = { key, bus, bar: 0, nextTime: actx.currentTime + 0.15, timer: 0 };
   const tick = () => {
     while (state.nextTime < actx.currentTime + LOOKAHEAD) {
-      state.nextTime += scheduler(state.bus, state.nextTime, state.bar++);
+      state.nextTime += scheduleBar(actx, state.bus, key, state.bar++, state.nextTime);
     }
   };
   state.timer = setInterval(tick, MUSIC_TICK);
@@ -368,40 +615,40 @@ export function stopMusic() {
   music = null;
 }
 
-export function musicMode() { return music ? { mode: music.mode, bar: music.bar } : null; }
+// Which mood is playing. Verification reads this, because the alternative is
+// judging music by ear through a headless browser.
+export function mode() { return music ? music.key : null; }
 
-// A slow drone under an area, so a dungeon feels different from a field.
-let ambientNodes = null;
+// The seam the verification hangs off: a mood rendered into a buffer instead of
+// into the speakers. No running context, no user gesture, no wall clock — the
+// same scheduleBar the live pump calls, against an offline context that renders
+// as fast as it can. 22050 Hz mono is plenty to measure level and balance.
+export function renderMood(key, seconds = 8) {
+  if (!MOODS[key]) return Promise.reject(new Error(`unknown mood: ${key}`));
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const octx = new OAC(1, Math.ceil(22050 * seconds), 22050);
+  const obus = octx.createGain();
+  obus.gain.value = MASTER;                  // what the live master would apply
+  obus.connect(octx.destination);
+  let t = 0;
+  for (let bar = 0; t < seconds; bar++) t += scheduleBar(octx, obus, key, bar, t);
+  return octx.startRendering();
+}
+
+// Which of an act's three moods an area calls for. The drone that used to run
+// under this — two sine oscillators that never stopped — is gone; the music is
+// the whole atmosphere now.
 export function ambient(level) {
   if (!actx) return;
-  stopAmbient();
   if (!level || muted) { stopMusic(); return; }
   const dark = (level.ambient[0] + level.ambient[1] + level.ambient[2]) / 3 < 60;
-  playMusic(level.townCentre ? 'town' : dark ? 'dungeon' : 'field');
-  const base = dark ? 48 : 72;
-  const nodes = [];
-  for (let i = 0; i < 2; i++) {
-    const osc = actx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = base * (i ? 1.5 : 1) * (1 + i * 0.008);
-    const g = actx.createGain();
-    g.gain.value = dark ? 0.05 : 0.03;
-    const lfo = actx.createOscillator();
-    lfo.frequency.value = 0.07 + i * 0.03;
-    const lg = actx.createGain();
-    lg.gain.value = dark ? 0.03 : 0.015;
-    lfo.connect(lg); lg.connect(g.gain);
-    osc.connect(g); g.connect(master);
-    osc.start(); lfo.start();
-    nodes.push(osc, lfo);
-  }
-  ambientNodes = nodes;
+  const place = level.townCentre ? 'town' : dark ? 'dungeon' : 'field';
+  playMusic(`a${level.act || 1}.${place}`);
 }
 
-export function stopAmbient() {
-  if (!ambientNodes) return;
-  for (const n of ambientNodes) { try { n.stop(); } catch { /* already stopped */ } }
-  ambientNodes = null;
-}
+// Nothing left to stop. The export survives so that anything written against
+// the old shape — the console hooks, a caller yet to be cleaned up — still
+// finds a function where it expects one.
+export function stopAmbient() {}
 
 export const EFFECT_NAMES = Object.keys(EFFECTS);
