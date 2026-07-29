@@ -135,7 +135,16 @@ Dependencies run one way: `core` → `art`/`audio` → `items` → `world`/`game
 - Development notes, the design spec and the phase-by-phase verification record are in
   `progress.md` and `docs/superpowers/`.
 
+## Backlog
+
+- **Nightmare** (designed, unbuilt — the Barbarian plan's stretch task, deferred at its ship gate):
+  killing Andariel unlocks a second difficulty on the title screen, per save. Same character, world
+  reseeded; monster level +15 (affix and loot tiers follow ilvl as they already do), monster life
+  x2.5 and damage x1.8, player resistances -40, XP curve unchanged. One `diff` flag in the save,
+  absent = Normal. Full mechanics and steps in
+  `docs/superpowers/plans/2026-07-29-barbarian-class.md`, Task 9.
+
 ## Not included
 
 Multiplayer, mercenaries, rune words, gems and sockets, gambling, the stash, difficulties above
-Normal, and acts two through five.
+Normal (Nightmare is designed — see Backlog), and acts two through five.
