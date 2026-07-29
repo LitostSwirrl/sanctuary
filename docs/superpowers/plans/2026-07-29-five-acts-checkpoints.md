@@ -7,8 +7,8 @@
 ## Status
 
 - **Phase 0 -- baseline commit**: done (2026-07-29). Polish batch committed as `ca81421` before this effort touches the same files.
-- **Phase 1 -- spec + plan**: in flight (this session). Spec to `docs/superpowers/specs/2026-07-29-five-acts-design.md`, plan to `docs/superpowers/plans/2026-07-29-five-acts.md`.
-- **Phase 2 -- music rewrite**: pending
+- **Phase 1 -- spec + plan**: done (2026-07-29). Spec `docs/superpowers/specs/2026-07-29-five-acts-design.md` (`2e44543`), plan `docs/superpowers/plans/2026-07-29-five-acts.md` (`be32fa2`) -- 15 tasks, six phases, probes and interfaces pinned per task.
+- **Phase 2 -- music rewrite**: in flight (plan Tasks 1-2, one Opus worker on `src/audio/synth.js`)
 - **Phase 3 -- skills to 30 per class**: pending
 - **Phase 4 -- world scaffolding + Act 1 expansion**: pending
 - **Phase 5 -- Acts 2 and 3**: pending
@@ -20,6 +20,7 @@
 1. **Music stays procedural** -- no asset files, ever. Kill the constant drone (`ambient()` oscillators in `src/audio/synth.js`), rewrite the score as fuller per-act compositions from synthesis. The zero-asset charter holds.
 2. **Classic start is the default, "yolo" mode selectable** -- New Game asks: Classic (level 1, earn everything) or Yolo (the current maxed start with chase uniques). Joseph's own word for the label: yolo.
 3. **Canon-leaning act density, and "act 1 should keep up"** -- each act is town + ~6 areas + mini-bosses + act boss; Act 1 gets expanded to the same density, not left at 4 areas.
+4. **The project's final goal, reset mid-effort (2026-07-29)**: 100% of a smaller, honest Diablo -- NOT parity with D2. Definition of done, roadmap (classes -> difficulties -> item endgame), and the ruled-out list (multiplayer, level-99 grind, any external asset) live in README "The goal"/"Roadmap"/"Ruled out". This effort's scope is unchanged by the reset.
 
 ## Cross-cutting contracts
 

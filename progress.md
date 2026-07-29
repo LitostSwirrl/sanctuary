@@ -267,3 +267,26 @@ inventory panels.
 **Not machine-verifiable here.** How the darkness feels in real play (a 27" monitor at night is
 not a screenshot), whether 8.5 tiles of torch is too tight while kiting, and the balance of the
 canon loadout against Andariel — those need Joseph's hands on it.
+
+## The five-act effort (2026-07-29, in flight)
+
+Joseph's ask: kill the constant hum in the BGM (it is the `ambient()` drone), expand both
+classes to the skills they should have, and make the game five full acts. Scope decided the
+same day: music stays procedural (fuller per-act score, no asset files), classic level-1
+start with "yolo" selectable, canon-leaning act density with Act 1 expanded to keep up.
+
+- Spec: `docs/superpowers/specs/2026-07-29-five-acts-design.md`
+- Plan: `docs/superpowers/plans/2026-07-29-five-acts.md` (15 tasks, six phases)
+- Checkpoints: `docs/superpowers/plans/2026-07-29-five-acts-checkpoints.md`
+
+Mid-effort, Joseph reset the project's destination: **100% of a smaller, honest Diablo,
+not 50% of the original** — completeness in one unlicensed file is the identity, parity is
+not the goal. The README's "The goal" and "Roadmap" sections are now the durable statement
+(definition of done, the three efforts after this one, and what is ruled out).
+
+Phase log (What/Why/Next per phase):
+
+- **Phase 1, spec + plan (done)**: the two documents above, committed `2e44543`/`be32fa2`.
+  Why: the spec is the contract -- 60 exact skills, 35 exact areas, 15 music moods, budgets
+  and a seven-point ship gate -- so implementation can fan out to workers without drift.
+  Next: Phase 2, the music rewrite.

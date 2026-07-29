@@ -135,16 +135,50 @@ Dependencies run one way: `core` → `art`/`audio` → `items` → `world`/`game
 - Development notes, the design spec and the phase-by-phase verification record are in
   `progress.md` and `docs/superpowers/`.
 
-## Backlog
+## The goal
 
-- **Nightmare** (designed, unbuilt — the Barbarian plan's stretch task, deferred at its ship gate):
-  killing Andariel unlocks a second difficulty on the title screen, per save. Same character, world
-  reseeded; monster level +15 (affix and loot tiers follow ilvl as they already do), monster life
-  x2.5 and damage x1.8, player resistances -40, XP curve unchanged. One `diff` flag in the save,
-  absent = Normal. Full mechanics and steps in
-  `docs/superpowers/plans/2026-07-29-barbarian-class.md`, Task 9.
+**100% of a smaller, honest Diablo — not 50% of the original.** (Set 2026-07-29.) The identity
+of this artifact is being a complete, coherent action-RPG in one file well under a megabyte,
+with nothing downloaded and nothing licensed — which is a thing Diablo 2 itself cannot be.
+Chasing parity would eventually pressure exactly the constraint that makes the project
+interesting: the moment "real" music or art files feel necessary, the charter is broken. So
+the finish line is defined by completeness, not comparison.
 
-## Not included
+Done means: five acts ending at the Worldstone; the classic five classes, each with its
+thirty-skill trees; Normal, Nightmare and Hell; an item endgame of sets, sockets, gems and the
+cube's core recipes on top of the affix system that already rolls correctly; all of it
+ship-gated in one file:// runnable html. When that list is empty, the project is finished.
 
-Multiplayer, mercenaries, rune words, gems and sockets, gambling, the stash, difficulties above
-Normal (Nightmare is designed — see Backlog), and acts two through five.
+Two caveats, stated plainly rather than promised around. By rough count of content — acts,
+areas, skills, bases, monsters — this lands somewhere near a quarter of D2 once the five-act
+effort ships, and the rest of the list needs no technology the codebase does not already
+have: a class is a figure, a tree and data (the Barbarian proved the pattern); difficulties
+are scaling tables plus immunities; sets and sockets extend the item roller. By production
+values, no: D2's atmosphere is thousands of hand-painted sprites, recorded voice acting and
+Matt Uelmen's guitar, and computed art has a real ceiling well short of that. The darkness,
+the light pools and the plucked-string score get further than you might expect, and that is
+where the pushing stops.
+
+## Roadmap
+
+Effort-sized, in order. Each lands ship-gated or not at all.
+
+1. **Five acts, full trees, real score** — in flight. Spec and plan under
+   `docs/superpowers/`; the hum dies, both trees reach thirty, the world reaches Baal.
+2. **The other three** — Amazon, Necromancer, Paladin. Per the Barbarian pattern each is a
+   figure, a tree and data; the Necromancer's summons ride the pet machinery Hydra added,
+   Paladin auras ride the buff hooks, and the Amazon brings bows, the one genuinely new
+   piece. Assassin and Druid only after the classic five feel right.
+3. **Nightmare and Hell** — the designed Nightmare (the Barbarian plan's Task 9 carries the
+   full mechanics) generalized to two more tiers, plus monster immunities, with affix and
+   loot tiers following ilvl as they already do.
+4. **The item endgame** — set bonuses, sockets and gems, the cube's core recipes.
+
+Fine additions that are not on the list and not required for 100%: mercenaries, runewords,
+the stash.
+
+## Ruled out
+
+Multiplayer (a different engineering universe, and it contradicts the single file),
+level-99-scale endgame grind (it only makes sense with multiplayer economies), and any
+external asset ever — image, audio or font. The constraint is the product.
