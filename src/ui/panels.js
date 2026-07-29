@@ -761,7 +761,10 @@ export class UI {
         if (player.gold < it.price) { this.say('Not enough gold'); return true; }
         if (!addToInventory(player, it)) { this.say('No room'); return true; }
         player.gold -= it.price;
-        this.vendorStock = this.vendorStock.filter((q) => q !== it);
+        // A named NPC's stock lives on the NPC (see ensureStock/vendorStockList);
+        // only the generic/no-NPC vendor keeps it on `this`.
+        if (this.npc && this.npc.stock) this.npc.stock = this.npc.stock.filter((q) => q !== it);
+        else this.vendorStock = this.vendorStock.filter((q) => q !== it);
         return true;
       }
 
