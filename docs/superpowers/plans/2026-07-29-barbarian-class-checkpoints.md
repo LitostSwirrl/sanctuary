@@ -11,7 +11,7 @@
 - **Task 2 — Class data and plumbing**: done (2026-07-29, commit 4ab59fd)
 - **Task 3 — Class select on the title**: done (2026-07-29, commit 79fcb99)
 - **Task 4 — Melee skill path + Combat strikes**: done (2026-07-29, commit 7cf6975)
-- **Task 5 — Leap and Whirlwind**: pending
+- **Task 5 — Leap and Whirlwind**: done (2026-07-29, commit 47df38b)
 - **Task 6 — Monster status + Warcries**: pending
 - **Task 7 — Masteries**: pending
 - **Task 8 — Verification contract (ship gate)**: pending
@@ -75,6 +75,14 @@ Execution mode: **subagent-driven** (decided 2026-07-29). First execution resume
 **Why**: The melee path is the mechanical spine of the class — mana-paid, veto-refunded, weapon-speed strikes with the skill ED/AR stacking the plan's formula convention. All observed live: knockback displacement (exact 0.7), two floats on one Double Swing, tooltip growth, "Not enough mana", the class gate both directions.
 
 **Next**: Task 5 (Leap and Whirlwind). One parked plan-level finding (controller-adjudicated, stands as designed): Double Swing's second hit shares the primary's hit-frame gate — whiffs entirely if the primary is invalidated mid-windup (~0.2s, 1 mana); matches the plain-attack whiff convention; only bash/doubleswing/concentrate consume meleeStrike. Overrule = move the guard per-hit.
+
+### Task 5 — Leap and Whirlwind (2026-07-29)
+
+**What**: The `player.action` hook (a `(dt) => boolean` closure ticked at the top of `Player.update`, even while busy), the `zOff` vertical draw offset in `drawEntity` (shadow stays at ground), the `applyStun` helper (boss-immune; full AI consumer lands in Task 6), the `leap` and `whirlwind` entries appended after `concentrate` (both `melee: true`), and interruption hygiene (enterArea clears action/busy/zOff; die clears action/zOff) — commit `47df38b`. Review Approved, spec PASS: every mandated block a verbatim match, doCast melee delegation and the effective-level convention checked against real call sites, save-schema confirmed unable to persist a mid-air zOff.
+
+**Why**: These are the class's mobility spine — the Barbarian's answer to Teleport. All observed live: the leap arc (zOff 16.71 at the formula's exact value), landing knockback + stunned-field writes, wall-mass refusal with no mana spent, Whirlwind line travel with per-0.15s hits and wall-stop, mana costs 3/12 exact.
+
+**Next**: Task 6 (monster stun/fear/Battle Cry + the five Warcries). Two notes ride forward: a pre-existing vendor buy crash (panels.js:764, null vendorStock) surfaced during unattended-drift checks — out of scope, routed to Task 8 sweep; and browser checks must stay atomic within one script call (real-time drift between tool calls lets the live rAF loop run the game unsupervised).
 
 ---
 
