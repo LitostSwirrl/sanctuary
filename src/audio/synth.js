@@ -286,28 +286,71 @@ function mthump(ctx, bus, when, o = {}) {
   src.stop(when + (o.dur || 0.5) + 0.05);
 }
 
+// A lowpass reads its Q in decibels, and the default of 1 is +1 dB: at the
+// cutoff the filter hands back 1.12 of what it was given. Around a feedback
+// loop that beats a 0.985 loop gain, so every pass is louder than the last and
+// the string screams instead of ringing — measured at a peak of 2.7e11 before
+// this constant existed. -3.01 dB is the flat Butterworth response, the only
+// setting that holds a loop under unity at every frequency.
+const FLAT_Q = -3.0103;
+
+// Audio is computed 128 frames at a time, and a feedback loop carries a whole
+// block of that latency on top of whatever delay is written into it. A string's
+// loop is one period long, so the block is also its pitch ceiling: once a
+// period is shorter than the loop's own latency there is no delay left to
+// shorten. That lands near 360 Hz at 48 kHz and 170 Hz in a 22050 Hz render.
+// Nothing complains past it — the note just plays flat, by an octave at 220 Hz
+// and worse above — so pluck asks the context where its ceiling is and hands
+// anything above it to a struck tone, leaving a mood table free to write
+// whatever pitch the music wants.
+const BLOCK = 128;
+
+// What a pluck becomes above that ceiling: a triangle struck and left to decay
+// under the same lowpass colour, on the same envelope. No string behind it,
+// nothing recirculating — but it starts hard, dies away, and is in tune.
+function struck(ctx, bus, when, freq, o = {}) {
+  const dur = o.dur || 1.2;
+  const osc = ctx.createOscillator();
+  osc.type = 'triangle';
+  osc.frequency.value = freq;
+  const damp = ctx.createBiquadFilter();
+  damp.type = 'lowpass';
+  damp.frequency.value = o.brightness || 2600;
+  damp.Q.value = FLAT_Q;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.linearRampToValueAtTime(o.gain ?? 0.16, when + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+  osc.connect(damp); damp.connect(g); g.connect(bus);
+  osc.start(when);
+  osc.stop(when + dur + 0.05);
+}
+
 // A plucked string: a millisecond of noise into a feedback delay whose loop
-// carries a lowpass, so each pass around the loop dulls — Karplus-Strong.
-// loopHz sets pitch (delay = 1/loopHz), brightness the loop filter cutoff.
+// carries a lowpass, so each pass around the loop dulls — Karplus-Strong. One
+// trip around the loop is one period of the note, which is what sets the pitch;
+// brightness is the loop filter's cutoff.
 function pluck(ctx, bus, when, freq, o = {}) {
+  const brightness = o.brightness || 2600;
+  // What the loop costs before any delay is written into it: one render block
+  // for the cycle, plus the damping filter's own group delay. Both have to come
+  // out of the delay or the string plays flat — measured an octave flat at
+  // 220 Hz, and further the higher the note, until this was subtracted.
+  const lag = BLOCK / ctx.sampleRate + Math.SQRT2 / (2 * Math.PI * brightness);
+  const period = 1 / freq;
+  if (period - lag < 1 / ctx.sampleRate) { struck(ctx, bus, when, freq, o); return; }
   const dur = o.dur || 1.2;
   const burst = ctx.createBufferSource();
   burst.buffer = noiseBufferFor(ctx);
   const bg = ctx.createGain();
   bg.gain.setValueAtTime(1, when);
-  bg.gain.setValueAtTime(0, when + 1 / freq);  // one period of noise seeds the loop
+  bg.gain.setValueAtTime(0, when + period);    // one period of noise seeds the loop
   const delay = ctx.createDelay(1);
-  delay.delayTime.value = 1 / freq;
+  delay.delayTime.value = period - lag;
   const damp = ctx.createBiquadFilter();
   damp.type = 'lowpass';
-  damp.frequency.value = o.brightness || 2600;
-  // A lowpass reads its Q in decibels, and the default of 1 is +1 dB: at the
-  // cutoff the filter hands back 1.12 of what it was given. Around a feedback
-  // loop that beats the 0.985 below it, so every pass is louder than the last
-  // and the string screams instead of ringing — measured at a peak of 2.7e11
-  // before this line existed. -3.01 dB is the flat Butterworth response, the
-  // only setting that holds the loop under unity at every frequency.
-  damp.Q.value = -3.0103;
+  damp.frequency.value = brightness;
+  damp.Q.value = FLAT_Q;
   const fb = ctx.createGain();
   const sustain = o.sustain ?? 0.985;          // loop gain < 1 or it rings forever
   fb.gain.setValueAtTime(sustain, when);
@@ -317,7 +360,9 @@ function pluck(ctx, bus, when, freq, o = {}) {
   burst.connect(bg); bg.connect(delay);
   delay.connect(damp); damp.connect(fb); fb.connect(delay);   // the loop
   delay.connect(out); out.connect(bus);
-  burst.start(when); burst.stop(when + 0.05);
+  // Every other voice reads the noise from a random point, so no two firings
+  // are seeded identically; a string is no different.
+  burst.start(when, rand(0, 0.6)); burst.stop(when + 0.05);
   // Feedback loops outlive their sources: the burst is long gone while the
   // delay keeps recirculating, so a live context would collect one running loop
   // per note until the bus is torn down. Open the loop as the note ends, then
@@ -425,6 +470,21 @@ const PITCHED = {
   saw: (ctx, bus, when, freq, o) => mnote(ctx, bus, when, freq, { ...o, type: 'sawtooth' }),
 };
 const PERC = { drum: mthump, shaker };
+
+// A mood names its voices as strings, so one typo in a mood table would throw
+// inside the scheduler tick — and that tick is a timer callback, so the throw
+// would take the pump down with it and the music would stop for good. Say what
+// is missing once, then carry on without that voice.
+const unnamed = new Set();
+function voice(table, kind) {
+  const fn = table[kind];
+  if (fn) return fn;
+  if (!unnamed.has(kind)) {
+    unnamed.add(kind);
+    console.warn(`synth: a mood asks for a voice named "${kind}", which does not exist`);
+  }
+  return null;
+}
 
 // The camp. Eight bars of finger-picked arpeggios — Am F C G, Am F Dm E —
 // each note a semitone offset from A2, slightly humanized in time and touch,
@@ -547,20 +607,22 @@ export function scheduleBar(ctx, bus, key, barIndex, t) {
 
   if (v.bass) {
     const every = v.bass.every || 1;
-    if (barIndex % every === 0) {
+    const play = voice(PITCHED, v.bass.kind);
+    if (play && barIndex % every === 0) {
       const chord = m.bars[Math.floor(barIndex / every) % m.bars.length];
-      PITCHED[v.bass.kind](ctx, bus, t, semiF(v.bass.root, chord),
+      play(ctx, bus, t, semiF(v.bass.root, chord),
         { ...v.bass, dur: barLen * (v.bass.hold || 1) });
     }
   }
 
   for (const hit of v.perc || []) {
     if (hit.chance !== undefined && rand(0, 1) > hit.chance) continue;
-    PERC[hit.kind](ctx, bus, t + beat * hit.at, hit);
+    const strike = voice(PERC, hit.kind);
+    if (strike) strike(ctx, bus, t + beat * hit.at, hit);
   }
 
-  if (v.lead) {
-    const play = PITCHED[v.lead.kind];
+  const play = v.lead && voice(PITCHED, v.lead.kind);
+  if (play) {
     for (const c of cellsFor(m, barIndex)) {
       // A player pushes and drags against the beat, so each note lands a few
       // milliseconds off it. Dragging the first note of the first bar backwards
@@ -575,9 +637,10 @@ export function scheduleBar(ctx, bus, key, barIndex, t) {
 
   const col = v.colour;
   if (col && rand(0, 1) < col.chance) {
+    const shimmer = voice(PITCHED, col.kind);
     const n = col.voices || 1;
-    for (let i = 0; i < n; i++) {
-      PITCHED[col.kind](ctx, bus, t + rand(0, beat),
+    for (let i = 0; shimmer && i < n; i++) {
+      shimmer(ctx, bus, t + rand(0, beat),
         col.freq * (1 + (i - (n - 1) / 2) * (col.detune || 0)), col);
     }
   }
