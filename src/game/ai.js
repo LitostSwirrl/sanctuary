@@ -107,7 +107,8 @@ function fireBolt(m, ctx, over = {}) {
     x: m.x, y: m.y, z: 16,
     vx: (dx / d) * b.speed, vy: (dy / d) * b.speed,
     speed: b.speed, element: b.element,
-    min: b.min * (1 + (m.mlvl - 1) * 0.3), max: b.max * (1 + (m.mlvl - 1) * 0.3),
+    min: b.min * (1 + (m.mlvl - 1) * 0.3) * (m.battlecry ? m.battlecry.dmg : 1),
+    max: b.max * (1 + (m.mlvl - 1) * 0.3) * (m.battlecry ? m.battlecry.dmg : 1),
     colour: b.colour, homing: b.homing || 0,
     hostile: true, owner: m, ttl: 3, drawR: 4,
     ...over,
@@ -177,6 +178,8 @@ export function updateAI(m, dt, ctx) {
     return;
   }
   if (m.frozen > 0) { m.updateAnim(dt); return; }
+  if (m.stunned > 0) { m.stunned -= dt; m.setAnim('idle'); m.updateAnim(dt); return; }
+  if (m.battlecry && (m.battlecry.t -= dt) <= 0) m.battlecry = null;
 
   m.cool -= dt;
   m.specialCool -= dt;

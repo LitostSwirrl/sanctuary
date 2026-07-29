@@ -106,11 +106,16 @@ export class Player extends Entity {
     this.effective = { str, dex, vit, ene };
 
     const prevMaxHp = this.maxHp, prevMaxMana = this.maxMana;
-    this.maxHp = maxLifeFor(this.cls, this.level, vit, t.life, t.lifePct);
-    this.maxMana = maxManaFor(this.cls, this.level, ene, t.mana, t.manaPct);
+    const bo = this.buffs.battleorders;
+    const boPct = bo ? bo.mag : 0;
+    this.maxHp = maxLifeFor(this.cls, this.level, vit, t.life, t.lifePct + boPct);
+    this.maxMana = maxManaFor(this.cls, this.level, ene, t.mana, t.manaPct + boPct);
 
     const armour = t.def * (1 + t.defPct / 100);
-    this.defense = Math.floor(defenseFrom(dex, armour));
+    let def = defenseFrom(dex, armour);
+    if (this.ironSkinLevel > 0) def *= 1 + (30 + 10 * (this.ironSkinLevel - 1)) / 100;
+    if (this.buffs.shout) def *= 1 + this.buffs.shout.mag / 100;
+    this.defense = Math.floor(def);
     this.attackRating = Math.floor(attackRatingFrom(dex, t.ar, this.level));
 
     for (const el of ['fire', 'cold', 'light', 'pois']) {
@@ -217,6 +222,12 @@ export class Player extends Entity {
 
   update(dt, level) {
     this.updateStatus(dt);
+    let buffExpired = false;
+    for (const id in this.buffs) {
+      this.buffs[id].t -= dt;
+      if (this.buffs[id].t <= 0) { delete this.buffs[id]; buffExpired = true; }
+    }
+    if (buffExpired) this.recalc();   // clamps life and mana to the lowered max
     if (!this.alive) { this.updateAnim(dt); return; }
 
     // A skill that owns the body for a moment: Leap's flight, Whirlwind's

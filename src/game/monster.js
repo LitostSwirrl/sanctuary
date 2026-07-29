@@ -39,6 +39,8 @@ export class Monster extends Entity {
     this.freezeImmune = !!def.freezeImmune;
 
     this.state = 'idle';
+    this.stunned = 0;
+    this.battlecry = null;      // { def, dmg, t } while Battle Cry holds
     this.cool = Math.random() * 0.6;
     this.blockedFor = 0;
     this.path = null;
@@ -102,7 +104,8 @@ export class Monster extends Entity {
   }
 
   rollDamage(rng) {
-    return this.dmgMin + rng.f() * (this.dmgMax - this.dmgMin);
+    const mul = this.battlecry ? this.battlecry.dmg : 1;
+    return (this.dmgMin + rng.f() * (this.dmgMax - this.dmgMin)) * mul;
   }
 }
 

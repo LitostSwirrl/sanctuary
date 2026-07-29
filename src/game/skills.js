@@ -561,6 +561,82 @@ export const SKILLS = [
       return true;
     },
   },
+
+  // ------------------------------------------------------- BARBARIAN WARCRIES
+  {
+    id: 'howl', name: 'Howl', tree: 'cries', req: 1, prereq: [], iconSeed: 0,
+    mana: () => 4,
+    blurb: 'A shout that sends lesser enemies running.',
+    effect: (l) => `Monsters within 4 tiles flee for ${(3 + 0.4 * (l - 1)).toFixed(1)}s`,
+    cast(caster, lvl, tx, ty, ctx) {
+      const dur = 3 + 0.4 * (lvl - 1);
+      ctx.fx.ring(caster.x, caster.y, { maxR: 4, cr: 232, cg: 160, cb: 48, life: 0.4, w: 4, lit: 1.4 });
+      for (const e of ctx.level.entities) {
+        if (!e.alive || e.isPlayer || e.isNpc || e.def.boss) continue;
+        if (Math.hypot(e.x - caster.x, e.y - caster.y) > 4 + e.radius) continue;
+        e.state = 'flee';
+        e.fleeTimer = Math.max(e.fleeTimer || 0, dur);
+      }
+    },
+  },
+  {
+    id: 'shout', name: 'Shout', tree: 'cries', req: 6, prereq: ['howl'], iconSeed: 1,
+    mana: () => 6,
+    blurb: 'A rallying cry that hardens the skin like armour.',
+    effect: (l) => `+${100 + 10 * (l - 1)}% Defence for ${20 + 5 * (l - 1)}s`,
+    cast(caster, lvl, tx, ty, ctx) {
+      caster.buffs.shout = { t: 20 + 5 * (lvl - 1), mag: 100 + 10 * (lvl - 1) };
+      caster.recalc();
+      ctx.fx.ring(caster.x, caster.y, { maxR: 2.2, cr: 200, cg: 190, cb: 150, life: 0.35, w: 3, lit: 1.2 });
+    },
+  },
+  {
+    id: 'battlecry', name: 'Battle Cry', tree: 'cries', req: 18, prereq: ['howl'], iconSeed: 2,
+    mana: () => 5,
+    blurb: 'A curse of a shout. What hears it fights worse.',
+    effect: (l) => `Enemies within 3.5 tiles: -50% Defence, -25% Damage for ${12 + (l - 1)}s`,
+    cast(caster, lvl, tx, ty, ctx) {
+      const dur = 12 + (lvl - 1);
+      ctx.fx.ring(caster.x, caster.y, { maxR: 3.5, cr: 220, cg: 120, cb: 60, life: 0.4, w: 4, lit: 1.4 });
+      for (const e of ctx.level.entities) {
+        if (!e.alive || e.isPlayer || e.isNpc) continue;
+        if (Math.hypot(e.x - caster.x, e.y - caster.y) > 3.5 + e.radius) continue;
+        e.battlecry = { def: 0.5, dmg: 0.75, t: dur };
+      }
+    },
+  },
+  {
+    id: 'battleorders', name: 'Battle Orders', tree: 'cries', req: 24, prereq: ['shout'], iconSeed: 3,
+    mana: () => 7,
+    blurb: 'The order to stand. Life and mana swell to meet it.',
+    effect: (l) => `+${30 + 3 * (l - 1)}% Maximum Life and Mana for ${30 + 6 * (l - 1)}s`,
+    cast(caster, lvl, tx, ty, ctx) {
+      caster.buffs.battleorders = { t: 30 + 6 * (lvl - 1), mag: 30 + 3 * (lvl - 1) };
+      caster.recalc();
+      ctx.fx.ring(caster.x, caster.y, { maxR: 2.6, cr: 240, cg: 200, cb: 120, life: 0.4, w: 3, lit: 1.4 });
+    },
+  },
+  {
+    id: 'warcry', name: 'War Cry', tree: 'cries', req: 24, prereq: ['battlecry'], iconSeed: 4,
+    mana: () => 10, element: 'phys',
+    damage: (l) => ({ min: 18 + 6 * (l - 1), max: 28 + 8 * (l - 1) }),
+    synergies: [{ id: 'howl', pct: 6 }, { id: 'battlecry', pct: 6 }],
+    blurb: 'A shout that lands like a blow, and leaves the survivors reeling.',
+    effect: (l) => `Stuns for ${Math.min(3, 1 + 0.1 * (l - 1)).toFixed(1)}s within 3 tiles`,
+    cast(caster, lvl, tx, ty, ctx) {
+      const sk = this;
+      const roll = rollFor(ctx, caster, sk, lvl);
+      const stun = Math.min(3, 1 + 0.1 * (lvl - 1));
+      ctx.fx.ring(caster.x, caster.y, { maxR: 3, cr: 255, cg: 180, cb: 80, life: 0.4, w: 5, lit: 2 });
+      for (const e of ctx.level.entities) {
+        if (!e.alive || e.isPlayer || e.isNpc) continue;
+        if (Math.hypot(e.x - caster.x, e.y - caster.y) > 3 + e.radius) continue;
+        ctx.damageMonster(e, { phys: roll() }, { source: caster });
+        applyStun(e, stun);
+      }
+      if (ctx.sfx) ctx.sfx('explode');
+    },
+  },
 ];
 
 export const SKILL_BY_ID = {};
