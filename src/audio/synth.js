@@ -386,11 +386,15 @@ function struck(ctx, bus, when, freq, o = {}) {
 // trip around the loop is one period of the note, which is what sets the pitch;
 // brightness is the loop filter's cutoff.
 function pluck(ctx, bus, when, freq, o = {}) {
-  // A note with no pitch, no length or no level is not a note. Moods are
-  // written by hand and silencing a voice with gain: 0 while composing is an
-  // obvious thing to reach for, so take it at its word and schedule nothing —
-  // every number below is about to be divided by one of these.
-  if (!(freq > 0) || !((o.gain ?? 0.16) > 0) || !((o.dur || 1.2) > 0)) return;
+  // A note with no pitch, no length or no level is not a note — every number
+  // below is about to be divided by one of these. scheduleBar checks what a
+  // mood wrote before any voice is called, so this is the backstop for calls
+  // that arrive some other way; it refuses the note and says so, because a
+  // note dropped in silence is the hardest kind of quiet to debug.
+  if (![freq, o.gain ?? 0.16, o.dur || 1.2].every((x) => Number.isFinite(x) && x > 0)) {
+    once(`synth: pluck refused a note it cannot play (freq ${freq}, gain ${o.gain}, dur ${o.dur})`);
+    return;
+  }
   const brightness = cutoff(o);
   // What the loop costs before any delay is written into it: one render block
   // for the cycle, plus the damping filter's own group delay. Both have to come
@@ -554,6 +558,36 @@ function voice(table, kind) {
   return null;
 }
 
+// A positive, finite number or null — what the dispatch layer in scheduleBar
+// means by a usable pitch, level or length.
+const usable = (x) => (Number.isFinite(x) && x > 0 ? x : null);
+
+// What each pitched voice plays at when a mood leaves its gain unwritten. The
+// voices carry these same numbers as `??` fallbacks of their own, but the
+// humanizing arithmetic in scheduleBar needs the default resolved into a real
+// number first: undefined times anything is NaN, and NaN is not nullish, so
+// it would sail through every downstream default and land in an AudioParam.
+// A new entry in PITCHED needs a line here too.
+const DEFAULT_GAIN = { pluck: 0.16, pad: 0.04, bell: 0.06, sine: 0.08, saw: 0.08 };
+
+// What a mood writes for a part is checked here before any voice sees it.
+// Unwritten fields are fine — every voice has its own fallback — and a dur
+// range is drawn and checked per note in scheduleBar instead. A written value
+// that is zero, negative or not a finite number silences the part: gain 0 is
+// a composer muting it, the rest are typos, and either way the number would
+// otherwise come out of the arithmetic as NaN inside the scheduler's timer,
+// where the throw kills the pump and the music stops for good. The part sits
+// the music out, and says so once.
+function partCheck(key, part, o) {
+  for (const field of ['gain', 'dur']) {
+    const x = o[field];
+    if (x == null || Array.isArray(x) || usable(x)) continue;
+    once(`synth: mood "${key}" writes ${part} ${field}: ${x}, so the ${part} is silent`);
+    return false;
+  }
+  return true;
+}
+
 // The camp. Eight bars of finger-picked arpeggios — Am F C G, Am F Dm E —
 // each note a semitone offset from A2, slightly humanized in time and touch,
 // with a soft bass root swelling under each bar.
@@ -639,19 +673,34 @@ for (const act of ['a2', 'a3', 'a4', 'a5']) {
 
 // What the lead plays this bar: a written figure, a motif fragment, or a walk
 // over the scale. Positions come back in beats from the start of the bar.
-function cellsFor(m, barIndex) {
-  if (m.figure) {
+// Material is trusted no further than the values were: an empty or mistyped
+// figure, motif or scale hands back an empty bar and one line of console,
+// never a throw — this runs inside the scheduler's timer.
+function cellsFor(m, key, barIndex) {
+  if (Array.isArray(m.figure) && m.figure.length) {
     const f = m.figure[barIndex % m.figure.length];
+    if (!Array.isArray(f)) {
+      once(`synth: mood "${key}" has a figure bar that is not a list of degrees, so the bar is empty`);
+      return [];
+    }
     return f.map((s, i) => ({ s, at: i * (m.beats / f.length) }));
   }
-  if (m.motifs) {
+  if (Array.isArray(m.motifs) && m.motifs.length) {
     if (barIndex % 2 || rand(0, 1) > (m.motifChance ?? 0.75)) return [];
     const motif = m.motifs[Math.floor(rand(0, m.motifs.length))];
+    if (!Array.isArray(motif)) {
+      once(`synth: mood "${key}" has a motif that is not a list of degrees, so the bar is empty`);
+      return [];
+    }
     return motif.map((s, i) => ({ s, at: 0.5 + i * 0.75 }));
   }
   if (rand(0, 1) < (m.rest || 0)) return [];
+  if (!Array.isArray(m.scale) || !m.scale.length) {
+    once(`synth: mood "${key}" gives its lead no figure, motifs or scale, so there is nothing to play`);
+    return [];
+  }
   const cells = [];
-  const n = m.density + Math.floor(rand(0, 3)) - 1;
+  const n = (m.density || 2) + Math.floor(rand(0, 3)) - 1;
   for (let i = 0; i < n; i++) {
     cells.push({
       s: m.scale[Math.floor(rand(0, m.scale.length))],
@@ -664,6 +713,14 @@ function cellsFor(m, barIndex) {
 // One bar of one mood, scheduled against whichever context is passed in — the
 // live one for playback, an offline one for measurement — and returning the
 // seconds it occupies, so the caller only has to keep adding.
+//
+// This is also the dispatch layer, and validation lives here rather than in
+// the voices: every pitch, level and length a mood wrote is resolved into a
+// sane number before any voice is called, because the whole function runs
+// inside the lookahead timer, where a single throw stops the music for good.
+// A part with nothing playable sits the bar out and says so once; the clock
+// advances regardless. The voices' own guards are backstops, not the front
+// line.
 export function scheduleBar(ctx, bus, key, barIndex, t) {
   const m = MOODS[key];
   if (!m) return 1;
@@ -674,53 +731,102 @@ export function scheduleBar(ctx, bus, key, barIndex, t) {
   // leave that clock where it was and the caller would sit asking for the same
   // bar until the tab froze — worse than a thrown error, because nothing says
   // what happened. A tempo of zero is the other way round: an infinitely long
-  // bar, and every note in it scheduled at infinity. Hand back a second of
-  // silence for both.
-  if (!Number.isFinite(barLen) || barLen <= 0) {
+  // bar, and every note in it scheduled at infinity. And a negative tempo and
+  // negative beats would cancel into a bar of positive length whose notes all
+  // land before it starts. Hand back a second of silence for all of them.
+  if (!Number.isFinite(beat) || beat <= 0 || !Number.isFinite(barLen) || barLen <= 0) {
     once(`synth: mood "${key}" has no usable tempo, so it has no bars to play`);
     return 1;
   }
   const v = m.voices;
+  if (!v) {
+    once(`synth: mood "${key}" has no voices, so its bars are silent`);
+    return barLen;
+  }
 
-  if (v.wind) wind(ctx, bus, t, barLen, v.wind);
+  if (v.wind && partCheck(key, 'wind', v.wind)) wind(ctx, bus, t, barLen, v.wind);
 
-  if (v.bass) {
+  if (v.bass && partCheck(key, 'bass', v.bass)) {
     const every = v.bass.every || 1;
     const play = voice(PITCHED, v.bass.kind);
     if (play && barIndex % every === 0) {
-      const chord = m.bars[Math.floor(barIndex / every) % m.bars.length];
-      play(ctx, bus, t, semiF(v.bass.root, chord),
-        { ...v.bass, dur: barLen * (v.bass.hold || 1) });
+      // The chord walk needs somewhere to walk: an empty or missing bars
+      // table indexes into nothing and turns the bass frequency into NaN.
+      if (!Array.isArray(m.bars) || !m.bars.length) {
+        once(`synth: mood "${key}" has no bars for the bass to walk, so the bass is silent`);
+      } else {
+        const chord = m.bars[Math.floor(barIndex / every) % m.bars.length];
+        const freq = usable(semiF(v.bass.root, chord));
+        const dur = usable(barLen * (v.bass.hold || 1));
+        if (!freq || !dur) {
+          once(`synth: mood "${key}" gives its bass nothing playable (root ${v.bass.root}, degree ${chord}, hold ${v.bass.hold})`);
+        } else {
+          play(ctx, bus, t, freq, { ...v.bass, dur });
+        }
+      }
     }
   }
 
-  for (const hit of v.perc || []) {
+  for (const hit of Array.isArray(v.perc) ? v.perc : []) {
     if (hit.chance !== undefined && rand(0, 1) > hit.chance) continue;
     const strike = voice(PERC, hit.kind);
-    if (strike) strike(ctx, bus, t + beat * hit.at, hit);
+    if (!strike || !partCheck(key, 'perc', hit)) continue;
+    // A hit with no written offset lands on the downbeat, not at NaN.
+    const at = Number.isFinite(hit.at) && hit.at > 0 ? hit.at : 0;
+    strike(ctx, bus, t + beat * at, hit);
   }
 
   const play = v.lead && voice(PITCHED, v.lead.kind);
-  if (play) {
-    for (const c of cellsFor(m, barIndex)) {
-      // A player pushes and drags against the beat, so each note lands a few
-      // milliseconds off it. Dragging the first note of the first bar backwards
-      // would ask for a negative time, which the API refuses — live playback
-      // starts a fifth of a second ahead and never sees it, an offline render
-      // starting at zero does.
-      const when = Math.max(0, t + beat * c.at + rand(-0.006, 0.01));
-      play(ctx, bus, when, semiF(m.root, c.s),
-        { ...v.lead, gain: v.lead.gain * rand(0.8, 1.15), dur: pick(v.lead.dur) });
+  if (play && partCheck(key, 'lead', v.lead)) {
+    // The humanized touch below is a multiply, and a multiply needs a real
+    // number on both sides: a mood that merely omits the lead's gain would
+    // send undefined * rand() = NaN into the voice, straight past every
+    // `?? default` downstream — NaN is not nullish. So the mood-level default
+    // is applied here, before the arithmetic ever runs.
+    let gain = v.lead.gain;
+    if (gain == null) {
+      once(`synth: mood "${key}" leaves its lead gain unwritten, so it plays at the ${v.lead.kind} default`);
+      gain = DEFAULT_GAIN[v.lead.kind] ?? 0.08;
+    }
+    const root = usable(m.root);
+    if (!root) {
+      once(`synth: mood "${key}" has no usable root, so the lead is silent`);
+    } else {
+      for (const c of cellsFor(m, key, barIndex)) {
+        const freq = usable(semiF(root, c.s));
+        if (!freq) {
+          once(`synth: mood "${key}" asks its lead for degree ${c.s}, which is not a pitch`);
+          continue;
+        }
+        const dur = pick(v.lead.dur);
+        if (dur != null && !usable(dur)) {
+          once(`synth: mood "${key}" draws an unplayable lead duration, so the note is dropped`);
+          continue;
+        }
+        // A player pushes and drags against the beat, so each note lands a few
+        // milliseconds off it. Dragging the first note of the first bar
+        // backwards would ask for a negative time, which the API refuses —
+        // live playback starts a fifth of a second ahead and never sees it, an
+        // offline render starting at zero does.
+        const when = Math.max(0, t + beat * c.at + rand(-0.006, 0.01));
+        play(ctx, bus, when, freq, { ...v.lead, gain: gain * rand(0.8, 1.15), dur });
+      }
     }
   }
 
   const col = v.colour;
-  if (col && rand(0, 1) < col.chance) {
+  if (col && rand(0, 1) < col.chance && partCheck(key, 'colour', col)) {
     const shimmer = voice(PITCHED, col.kind);
-    const n = col.voices || 1;
+    // The voice count is capped: a written Infinity would loop the scheduler
+    // forever, which freezes the tab harder than any throw.
+    const n = Math.min(16, col.voices || 1);
     for (let i = 0; shimmer && i < n; i++) {
-      shimmer(ctx, bus, t + rand(0, beat),
-        col.freq * (1 + (i - (n - 1) / 2) * (col.detune || 0)), col);
+      const freq = usable(col.freq * (1 + (i - (n - 1) / 2) * (col.detune || 0)));
+      if (!freq) {
+        once(`synth: mood "${key}" colours at freq ${col.freq}, which is not a pitch`);
+        break;
+      }
+      shimmer(ctx, bus, t + rand(0, beat), freq, col);
     }
   }
 
