@@ -15,7 +15,8 @@
 - **Task 6 — Monster status + Warcries**: done (2026-07-29, commit 8b8fb6b)
 - **Task 7 — Masteries**: done (2026-07-29, commit e202576)
 - **Task 8 — Verification contract (ship gate)**: done (2026-07-29, commits f72d45e/9975586/4353c5f — 7/8 outright, cold bake adjudicated pre-existing)
-- **Task 9 — Nightmare (STRETCH, only after Task 8 green)**: pending
+- **Task 9 — Nightmare (STRETCH)**: moved to the README backlog (2026-07-29) per the plan's own gate — Task 8 plus the final review uncovered enough work (vendor fix, two Important findings, a five-commit fix wave) that building it now would rush
+- **Final whole-branch review** (c9ff6c1..bc8a28e, then the fix wave): done (2026-07-29) — Ready to ship; clean after one fix wave (4581e1a..370818a), scoped re-review 5/5 ADDRESSED
 
 Execution mode: **subagent-driven** (decided 2026-07-29). First execution resume prompt below.
 
@@ -107,6 +108,14 @@ Execution mode: **subagent-driven** (decided 2026-07-29). First execution resume
 **Why**: This is the spec's ship gate — the class ships only on observed behavior, and the record now states what was measured, not a bare pass.
 
 **Next**: Final whole-branch review (c9ff6c1..HEAD on the most capable model, pointed at the ledger's deferred minors and parked rulings), then finishing-a-development-branch; Task 9 (Nightmare) strictly per its gate.
+
+### Final review + fix wave, and the Task 9 gate (2026-07-29)
+
+**What**: The whole-branch review (c9ff6c1..bc8a28e, most capable model) returned Ready to ship WITH FIXES: two Important findings the per-task gates could not see — a targeted melee skill bound to the LEFT button dead-clicked (castsOnLeft wins the click chain before the walk branch, and the meleeStrike veto swallowed the click, immobilizing mouse movement), and Battle Orders healed current life/mana on cast against the plan's own Task 6 acceptance text ("current values keep their absolute numbers"; controller ruling: that text governs) — plus four minors, and CONCUR on all seventeen prior ledger items including both parked rulings (Double Swing's shared hit-frame gate; the cold-bake adjudication). One fix wave, five commits (4581e1a..370818a): the walk fallback on melee veto with doCast now returning castSkill's result code (mana path untouched); Battle Orders snapshots and min-clamps current at application (expiry clamp already correct); continueGame snaps a blocked restore position to nearestOpen (a mid-Leap save could restore inside a wall); the orphaned TREES export removed; the verification record's one overstated measurement hedged. Scoped re-review: 5/5 ADDRESSED, no new Critical/Important breakage. Task 9 (Nightmare) moved to the README backlog per its own gate; the SDD workspace deleted after the clean verdict.
+
+**Why**: Both Importants were genuinely cross-task — a binding configuration no task's checks exercised, and an acceptance line unobservable at full orbs — exactly what the whole-branch pass exists to catch.
+
+**Next**: Nothing pending. The effort is closed; Nightmare waits in the README backlog with its full design in the plan's Task 9 section. One design question parked on the ledger for any future pass: FCR gear silently governs the Barbarian's warcry lockout while his sheet hides the stat.
 
 ---
 
