@@ -12,7 +12,7 @@
 - **Task 3 — Class select on the title**: done (2026-07-29, commit 79fcb99)
 - **Task 4 — Melee skill path + Combat strikes**: done (2026-07-29, commit 7cf6975)
 - **Task 5 — Leap and Whirlwind**: done (2026-07-29, commit 47df38b)
-- **Task 6 — Monster status + Warcries**: pending
+- **Task 6 — Monster status + Warcries**: done (2026-07-29, commit 8b8fb6b)
 - **Task 7 — Masteries**: pending
 - **Task 8 — Verification contract (ship gate)**: pending
 - **Task 9 — Nightmare (STRETCH, only after Task 8 green)**: pending
@@ -83,6 +83,14 @@ Execution mode: **subagent-driven** (decided 2026-07-29). First execution resume
 **Why**: These are the class's mobility spine — the Barbarian's answer to Teleport. All observed live: the leap arc (zOff 16.71 at the formula's exact value), landing knockback + stunned-field writes, wall-mass refusal with no mana spent, Whirlwind line travel with per-0.15s hits and wall-stop, mana costs 3/12 exact.
 
 **Next**: Task 6 (monster stun/fear/Battle Cry + the five Warcries). Two notes ride forward: a pre-existing vendor buy crash (panels.js:764, null vendorStock) surfaced during unattended-drift checks — out of scope, routed to Task 8 sweep; and browser checks must stay atomic within one script call (real-time drift between tool calls lets the live rAF loop run the game unsupervised).
+
+### Task 6 — Monster status + Warcries (2026-07-29)
+
+**What**: `m.stunned`/`m.battlecry` fields, the AI stun gate and battlecry countdown, the melee and ranged monster-damage debuff folds, the player buff tick in `Player.update` (recalc-on-expiry clamps current to lowered max), the Battle Orders/Shout/Iron Skin folds in `recalc`, and the five Warcries (Howl, Shout, Battle Cry, Battle Orders, War Cry) appended after `whirlwind` — commit `8b8fb6b`, exactly monster.js/ai.js/player.js/skills.js. Review Approved, spec PASS: brief-verbatim at every insertion point; reviewer independently confirmed applyStun's central boss/dead guard, damageMonster's no-roll path, save.js's inability to persist buffs, and the three-way boss-immunity split (fear/stun immune, Battle Cry not).
+
+**Why**: This is the class's support half and the monster-status layer the whole kit stands on. Observed live: Howl routs and Corpsefire stands, Shout doubles defence for its printed window, Battle Orders raises max and clamps on expiry, War Cry damages and freezes, buffs die on reload, Sorceress regression green. One check ruled resolved-by-mechanism: Battle Cry's "hits land more often" is unobservable at the 95% to-hit cap; the defence halving was proven exact through the real to-hit path (ledger has the full ruling).
+
+**Next**: Task 7 (Masteries — four passives, refreshPassives, recalc weapon-kind fold).
 
 ---
 
