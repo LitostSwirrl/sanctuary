@@ -143,6 +143,13 @@ function continueGame() {
   corpse = d.corpse || null;
   enterArea(d.area || 'town', null, true);
   if (d.at) { player.x = d.at.x; player.y = d.at.y; }
+  // Leap interpolates position across walls by design, so a save written
+  // mid-flight (die()'s save, or a tab close) can persist a spot inside
+  // blocked terrain that no movement mechanism can escape. Snap clear of it.
+  if (level.blockedCircle(player.x, player.y, player.radius)) {
+    const spot = level.nearestOpen(player.x, player.y);
+    player.x = spot.x; player.y = spot.y;
+  }
   cam.x = player.x; cam.y = player.y;
   state = 'playing';
   titleStep = 'menu';
