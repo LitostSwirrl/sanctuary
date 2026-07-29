@@ -434,11 +434,14 @@ function servePending() {
   if (!player.path) pending = null;
 }
 
+// Returns castSkill's own result code ('ok' | 'locked' | 'mana' | 'failed') so
+// callers can tell a melee veto (nothing in reach) apart from a mana refusal —
+// the two need different fallbacks at the click site.
 function doCast(id, tx, ty) {
-  if (!id || id === 'attack') return false;
+  if (!id || id === 'attack') return 'locked';
   const r = castSkill(player, id, tx, ty, gctx);
-  if (r === 'mana') { ui.say('Not enough mana'); audio.sfx('error'); return false; }
-  if (r !== 'ok') return false;
+  if (r === 'mana') { ui.say('Not enough mana'); audio.sfx('error'); return r; }
+  if (r !== 'ok') return r;
   const sk = SKILL_BY_ID[id];
   if (!sk.melee) {
     // Casts take the cast animation and the FCR lockout. A melee skill has
@@ -448,7 +451,7 @@ function doCast(id, tx, ty) {
     audio.sfx('cast');
     player.setAnim('cast', { loop: false, force: true, onEnd: () => player.setAnim('idle') });
   }
-  return true;
+  return r;
 }
 
 // The bar's clickable rectangles, kept from the last frame it was drawn. The
@@ -623,7 +626,15 @@ function step(dt) {
       } else if (castsOnLeft()) {
         // A skill bound to the left button casts where you click, as in the
         // original — which is why Attack is what sits there by default.
-        if (player.busy <= 0) { player.target = null; player.stop(); doCast(player.leftSkill, w.x, w.y); }
+        if (player.busy <= 0) {
+          player.target = null; player.stop();
+          const r = doCast(player.leftSkill, w.x, w.y);
+          // Mouse clicks are the game's only movement: a melee skill's veto
+          // (nothing in reach) must still send the player toward the click
+          // rather than doing nothing. Mana refusal keeps its own toast and
+          // does not walk — that path is unchanged.
+          if (r === 'failed' && SKILL_BY_ID[player.leftSkill].melee) player.moveTo(level, w.x, w.y);
+        }
       } else if (m && !m.isNpc) {
         player.target = m;
         if (player.distTo(m) <= 1.6) { player.stop(); playerAttack(m); }
@@ -635,8 +646,15 @@ function step(dt) {
     }
   } else if (Input.mouse.downL && !overHud && !overPanel && player.busy <= 0 && !ui.drag && !player.target) {
     const w = cam.toWorld(mx, my);
-    if (castsOnLeft()) doCast(player.leftSkill, w.x, w.y);
-    else if (!player.moveGoal || Math.hypot(w.x - player.moveGoal.x, w.y - player.moveGoal.y) > 0.8) {
+    if (castsOnLeft()) {
+      const r = doCast(player.leftSkill, w.x, w.y);
+      // Same fallback as the click variant, guarded the same way the plain
+      // walk below is: do not recompute the path every held frame.
+      if (r === 'failed' && SKILL_BY_ID[player.leftSkill].melee
+        && (!player.moveGoal || Math.hypot(w.x - player.moveGoal.x, w.y - player.moveGoal.y) > 0.8)) {
+        player.moveTo(level, w.x, w.y);
+      }
+    } else if (!player.moveGoal || Math.hypot(w.x - player.moveGoal.x, w.y - player.moveGoal.y) > 0.8) {
       player.moveTo(level, w.x, w.y);
     }
   }
