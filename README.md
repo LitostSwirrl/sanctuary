@@ -5,7 +5,8 @@ tile, item icon and sound effect is computed at load, in about a second.
 
 ## Run it
 
-Play it in a browser: **https://litostswirrl.github.io/sanctuary/**
+Play it in a browser: **https://litostswirrl.github.io/sanctuary/**, or the standalone
+single-file build at **https://sanctuary-d2.web.app**
 
 Or locally:
 
@@ -138,6 +139,8 @@ Dependencies run one way: `core` → `art`/`audio` → `items` → `world`/`game
   a slain boss stays slain.
 - Serve with `node serve.js`, not `python3 -m http.server`. It sends `no-store`; a cached ES module
   once made a real fix look like it had failed.
+- GitHub Pages redeploys on push to `main`. `firebase deploy --only hosting` ships the standalone
+  build to sanctuary-d2.web.app; its predeploy hook runs `node build.js` first.
 - Development notes, the design spec and the phase-by-phase verification record are in
   `progress.md` and `docs/superpowers/`.
 

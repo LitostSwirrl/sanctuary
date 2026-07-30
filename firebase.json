@@ -1,0 +1,6 @@
+{
+  "hosting": {
+    "public": "dist",
+    "predeploy": "node build.js && mkdir -p dist && cp diablo.html dist/index.html"
+  }
+}
