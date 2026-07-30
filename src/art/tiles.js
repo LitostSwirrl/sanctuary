@@ -983,7 +983,10 @@ function propLavavent(rng) {
   ellipseF(buf, cx, cy - 0.5, 3.6, 1.8, packHex('#ff8a24'));
   ellipseF(buf, cx, cy - 1, 1.6, 0.9, packHex('#ffd070'));
   outline(buf, OUTLINE);
-  return { canvas: bufToCanvas(buf), ox: cx, oy: cy + 6, light: { r: 5.5, color: '#ff6a24', dz: 10 } };
+  // No light descriptor here: what a prop lights is the generator's business,
+  // and it reads `LIGHT_COLORS` in gen.js. A baker that carried its own light
+  // shape would be a second, differently-spelled definition nothing consults.
+  return { canvas: bufToCanvas(buf), ox: cx, oy: cy + 6 };
 }
 
 // -------------------------------------------------------------- winter props

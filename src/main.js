@@ -18,7 +18,7 @@ import { generate } from './world/gen.js';
 import { Renderer } from './render/renderer.js';
 import { drawMinimap } from './render/minimap.js';
 import { Player } from './game/player.js';
-import { applyDamage, applyChill, onStruck, rollHit, rollDamage, monsterDefense, tickBurn, xpPenalty, xpForLevel, LEVEL_CAP } from './game/combat.js';
+import { applyDamage, applyChill, onStruck, rollHit, rollDamage, monsterDefense, tickBurn, xpPenalty, xpForLevel, xpToNext, LEVEL_CAP } from './game/combat.js';
 import { populate, spawnBoss, Monster } from './game/monster.js';
 import { populateTown } from './game/npc.js';
 import { updateAI, taunt } from './game/ai.js';
@@ -222,7 +222,7 @@ function getLevel(id) {
   if (def.monsters && def.monsters.length) populate(lv, def, lvRng, assets.figures);
   if (def.boss && !player.quests[def.quest]) spawnBoss(lv, def.boss, lvRng, assets.figures);
   // Any town with a cast gets it; populateTown filters the roster by the
-  // town's own id, so the fortress stub simply has nobody on its list yet.
+  // town's own id, so each of the five towns stands up its own people.
   if (lv.townCentre) populateTown(lv, lv.townCentre.x, lv.townCentre.y, assets.figures, player.cls, id);
   if (def.kind !== 'town') scatterWorldItems(lv, lvRng, 6 + Math.round(def.areaLevel * 0.8));
   levels.set(id, lv);
@@ -309,6 +309,17 @@ function grantQuest(name, message, reward) {
   save(game);
 }
 
+// Experience granted by a deed rather than a kill -- the Ancients' bounty. The
+// level-up handling is the same one killing something gets, because arriving at
+// a level from a quest should look exactly like arriving at it from a corpse.
+function grantXp(amount) {
+  player.gainXp(Math.round(amount), (lvl) => {
+    FX.levelUp(fx, player.x, player.y);
+    audio.sfx('levelUp');
+    ui.say(`Welcome to level ${lvl}`);
+  });
+}
+
 function killMonster(m) {
   const pen = xpPenalty(player.level, m.mlvl);
   player.gainXp(Math.round(m.xpValue * pen), (lvl) => {
@@ -348,10 +359,38 @@ function killMonster(m) {
         () => { player.statPoints += 5; });
     } else if (m.defId === 'mephisto') {
       // The gate of act three, and the road out of the world of the living:
-      // Meshif's second sailing ends at the Pandemonium Fortress stub until
-      // Phase 6 builds the real act four.
+      // Meshif's second sailing lands at the Pandemonium Fortress.
       grantQuest('mephisto', 'Mephisto is destroyed. Meshif will carry you on from these shores.',
         () => { player.statPoints += 5; player.skillPoints += 2; });
+    } else if (m.defId === 'izual') {
+      // Hell's optional bounty, and the largest single skill grant in the game:
+      // what an angel knew is worth two points, not one.
+      grantQuest('izual', 'Izual is freed. What he knew of hell settles on you: two skill points.',
+        () => { player.skillPoints += 2; });
+    } else if (m.defId === 'hephasto') {
+      grantQuest('hephasto', 'Hephasto is broken. The river runs over his forge now.',
+        () => { player.statPoints += 5; });
+    } else if (m.defId === 'diablo') {
+      // The gate of act four: his flag is what lets Tyrael open the portal north.
+      grantQuest('diablo', 'Diablo is destroyed. Tyrael will open the way to Harrogath now.',
+        () => { player.statPoints += 5; player.skillPoints += 2; });
+    } else if (m.defId === 'shenk') {
+      grantQuest('shenk', 'Shenk the Overseer is dead. The siege has lost its whip.',
+        () => { player.statPoints += 5; });
+    } else if (m.defId === 'ancient') {
+      // The Ancients pay in experience rather than points, which is the one
+      // reward shape the game has not used yet: two levels' worth at the level
+      // the climb is fought at, so it scales with whoever gets there.
+      grantQuest('ancients', 'The Ancients grant you passage. The climb itself has taught you something.',
+        () => { grantXp(xpToNext(player.level) * 2); });
+    } else if (m.defId === 'baal') {
+      // The end. `won` has been waiting for this since act one, and all it does
+      // is put words on the screen: the world stays open, the save stays valid,
+      // and anything still unkilled is still there to kill.
+      grantQuest('baal', 'The Worldstone falls quiet.', () => {
+        player.statPoints += 5; player.skillPoints += 2;
+        state = 'won';
+      });
     }
   }
 }
@@ -958,9 +997,9 @@ function drawDeath() {
   ctx2d.textAlign = 'left';
 }
 
-// Nothing reaches this yet. Andariel used to set `won` and no longer does -- she
-// is act one's gate -- so the screen and the state it draws for are waiting for
-// Baal in Task 12, whose victory will want its own words here.
+// Baal sets `won`, and nothing else does: the four earlier bosses are gates.
+// The banner sits over a world that is still running -- the state permits play,
+// so this is a caption on the game rather than a curtain across it.
 function drawWon() {
   const s = uiScale;
   const cx = canvas.width / 2;
@@ -969,10 +1008,10 @@ function drawWon() {
   ctx2d.textAlign = 'center';
   ctx2d.fillStyle = '#c8a03a';
   ctx2d.font = `${Math.round(30 * s)}px Georgia, serif`;
-  ctx2d.fillText('Andariel is dead', cx, 105 * s);
+  ctx2d.fillText('The Worldstone falls quiet', cx, 105 * s);
   ctx2d.fillStyle = '#9a8f70';
   ctx2d.font = `${Math.round(14 * s)}px Georgia, serif`;
-  ctx2d.fillText('The slice is finished. Keep playing if you like.', cx, 132 * s);
+  ctx2d.fillText('Baal is destroyed and all five acts are behind you. Keep playing if you like.', cx, 132 * s);
   ctx2d.textAlign = 'left';
 }
 

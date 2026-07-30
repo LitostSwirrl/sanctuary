@@ -1,6 +1,6 @@
-// Every area in the world, in the order the player walks them. Acts 1 to 3
-// stand complete -- the encampment to the Durance of Hate -- plus the fortress
-// stub Meshif's second sailing arrives at; acts 4 and 5 arrive area by area.
+// Every area in the world, in the order the player walks them. All five acts
+// stand complete: the encampment to the Throne of Destruction, thirty-five
+// areas, with the Pandemonium Fortress and Harrogath as their acts' towns.
 //
 // `act` places an area in the five-act world and is the authority on that:
 // `AREA_BY_ID[id].act` answers it everywhere, the generated level carries the
@@ -578,24 +578,366 @@ export const AREAS = [
     exits: [{ to: 'travincal', kind: 'stairs' }],
   },
 
-  // PHASE 6 REPLACES THIS. A placeholder so Meshif's second sailing has
-  // somewhere to arrive once Mephisto falls: town ground, safe, a waypoint to
-  // light, and nothing else -- the same courtesy the Lut Gholein stub paid
-  // Warriv's caravan. The real Pandemonium Fortress brings the obsidian
-  // terrain, its townsfolk and the Outer Steppes with it.
+  // ------------------------------------------------------------------ act 4
+  // Hell, and canon act four is short on purpose: five areas between the
+  // portal and the Lord of Terror. Blood is the scorched ground, obsidian the
+  // built stone -- the fortress is the only place in the act that is not on
+  // fire, which is why its ambient is the only warm one that is not red.
   {
     id: 'fortress',
     act: 4,
     name: 'Pandemonium Fortress',
     kind: 'town',
-    terrain: 'crypt',
-    wallTerrain: 'crypt',
+    terrain: 'obsidian',
+    wallTerrain: 'obsidian',
     areaLevel: 0,
-    ambient: [70, 52, 50],
+    ambient: [86, 70, 74],
     size: 40,
     waypoint: true,
     monsters: [],
-    exits: [],
+    // A garrison on a rock over hell: no tents, no wagons. Braziers where the
+    // encampment keeps campfires, banners on the wall, and a hellspike or two
+    // that came up through the floor and was left where it stood.
+    furniture: [
+      ['brazier', -4, -7], ['banner', -6, -7], ['crate', -2, -7],         // Jamella
+      ['anvil', 5, -7], ['banner', 3, -8], ['barrel', 6, -6],            // Halbu
+      ['banner', -8, 0], ['crate', -8, 3],                               // Cain
+      ['brazier', 4, 8], ['hellspike', 6, 9], ['hellspike', 2, 10],      // Tyrael
+      ['brazier', 0, 0], ['hellspike', 0, -3],                           // the courtyard
+    ],
+    exits: [{ to: 'steppes', side: 's' }],
+  },
+  {
+    id: 'steppes',
+    act: 4,
+    name: 'Outer Steppes',
+    kind: 'outdoor',
+    terrain: 'blood',
+    pathTerrain: 'obsidian',
+    wallTerrain: 'obsidian',
+    areaLevel: 28,
+    ambient: [82, 56, 52],
+    size: 74,
+    props: ['hellspike', 'rock', 'bones', 'lavavent'],
+    propDensity: 0.06,
+    packs: 12,
+    monsters: [
+      { id: 'doomknight', weight: 3, packMin: 3, packMax: 5 },
+      { id: 'urdar', weight: 2, packMin: 2, packMax: 3 },
+      { id: 'balrog', weight: 1, packMin: 1, packMax: 2 },
+    ],
+    exits: [
+      { to: 'fortress', side: 'n' },
+      { to: 'despair', side: 's' },
+    ],
+  },
+  {
+    id: 'despair',
+    act: 4,
+    name: 'Plains of Despair',
+    kind: 'outdoor',
+    terrain: 'blood',
+    pathTerrain: 'obsidian',
+    wallTerrain: 'obsidian',
+    areaLevel: 29,
+    ambient: [80, 54, 52],
+    size: 76,
+    props: ['hellspike', 'hellspike', 'bones', 'lavavent', 'rock'],
+    propDensity: 0.06,
+    packs: 13,
+    quest: 'izual',
+    boss: 'izual',
+    monsters: [
+      { id: 'doomknight', weight: 3, packMin: 3, packMax: 5 },
+      { id: 'oblivionknight', weight: 1, packMin: 1, packMax: 2 },
+      { id: 'balrog', weight: 2, packMin: 1, packMax: 3 },
+    ],
+    exits: [
+      { to: 'steppes', side: 'n' },
+      { to: 'damned', side: 's' },
+    ],
+  },
+  {
+    id: 'damned',
+    act: 4,
+    name: 'City of the Damned',
+    kind: 'outdoor',
+    terrain: 'obsidian',
+    pathTerrain: 'obsidian',
+    wallTerrain: 'obsidian',
+    areaLevel: 30,
+    // Just over the line the music's dark heuristic draws at an average of 60:
+    // the City of the Damned is a ruin under an open sky and has to sound like
+    // one. A shade darker and it would play the act's dungeon mood.
+    ambient: [76, 56, 58],
+    size: 74,
+    waypoint: true,
+    props: ['column', 'hellspike', 'brazier', 'bones', 'lavavent'],
+    propDensity: 0.07,
+    packs: 14,
+    monsters: [
+      { id: 'oblivionknight', weight: 2, packMin: 1, packMax: 2 },
+      { id: 'doomknight', weight: 3, packMin: 3, packMax: 6 },
+      { id: 'urdar', weight: 2, packMin: 2, packMax: 3 },
+    ],
+    exits: [
+      { to: 'despair', side: 'n' },
+      { to: 'flame', side: 's', kind: 'stairs' },
+    ],
+  },
+  {
+    id: 'flame',
+    act: 4,
+    name: 'River of Flame',
+    kind: 'dungeon',
+    terrain: 'blood',
+    wallTerrain: 'obsidian',
+    areaLevel: 31,
+    ambient: [40, 22, 20],
+    size: 58,
+    depth: 1,
+    waypoint: true,
+    // The one area with `lava`: the generator lays impassable channels of it
+    // across the floor and vents light along them. Everything still connects --
+    // a strip that would cut a room off is not laid.
+    lava: true,
+    props: ['lavavent', 'hellspike', 'bones', 'rock'],
+    packs: 13,
+    quest: 'hephasto',
+    boss: 'hephasto',
+    monsters: [
+      { id: 'urdar', weight: 3, packMin: 2, packMax: 4 },
+      { id: 'balrog', weight: 2, packMin: 1, packMax: 3 },
+      { id: 'doomknight', weight: 2, packMin: 3, packMax: 5 },
+    ],
+    exits: [
+      { to: 'damned', kind: 'stairs' },
+      { to: 'chaos', kind: 'stairs' },
+    ],
+  },
+  {
+    id: 'chaos',
+    act: 4,
+    name: 'Chaos Sanctuary',
+    kind: 'dungeon',
+    terrain: 'obsidian',
+    wallTerrain: 'obsidian',
+    areaLevel: 32,
+    ambient: [30, 18, 22],
+    size: 62,
+    depth: 1,
+    lava: true,
+    props: ['column', 'hellspike', 'lavavent', 'bones'],
+    packs: 15,
+    quest: 'diablo',
+    boss: 'diablo',
+    monsters: [
+      { id: 'oblivionknight', weight: 2, packMin: 1, packMax: 3 },
+      { id: 'doomknight', weight: 3, packMin: 4, packMax: 6 },
+      { id: 'balrog', weight: 2, packMin: 2, packMax: 3 },
+      { id: 'urdar', weight: 2, packMin: 2, packMax: 3 },
+    ],
+    exits: [{ to: 'flame', kind: 'stairs' }],
+  },
+
+  // ------------------------------------------------------------------ act 5
+  // Mount Arreat: snow above ground, ice below it. The barbarians hold one
+  // town and are losing it, which is why Harrogath's furniture is siege gear.
+  {
+    id: 'harrogath',
+    act: 5,
+    name: 'Harrogath',
+    kind: 'town',
+    terrain: 'snow',
+    wallTerrain: 'ice',
+    areaLevel: 0,
+    ambient: [92, 100, 118],
+    size: 40,
+    waypoint: true,
+    monsters: [],
+    furniture: [
+      ['campfire', -4, -7], ['crate', -6, -7], ['barrel', -2, -7],       // Malah
+      ['anvil', 5, -7], ['crate', 3, -8], ['barrel', 6, -6],             // Larzuk
+      ['tent', 8, 0], ['crate', 8, 3], ['icicle', 7, 4],                 // Anya
+      ['tent', -8, 0], ['banner', -8, 3],                                // Cain
+      ['banner', -1, 8], ['frozencorpse', -3, 9],                        // Qual-Kehk
+      ['brazier', 0, 0], ['icicle', 0, -3],                              // the square
+    ],
+    exits: [{ to: 'foothills', side: 's' }],
+  },
+  {
+    id: 'foothills',
+    act: 5,
+    name: 'Bloody Foothills',
+    kind: 'outdoor',
+    terrain: 'snow',
+    pathTerrain: 'dirt',
+    wallTerrain: 'snow',
+    areaLevel: 35,
+    ambient: [80, 88, 104],
+    size: 74,
+    props: ['icicle', 'frozencorpse', 'rock', 'bones', 'tree'],
+    propDensity: 0.06,
+    packs: 13,
+    quest: 'shenk',
+    boss: 'shenk',
+    monsters: [
+      { id: 'enslaved', weight: 3, packMin: 4, packMax: 7 },
+      { id: 'deathminion', weight: 2, packMin: 2, packMax: 4 },
+      { id: 'succubus', weight: 1, packMin: 1, packMax: 2 },
+    ],
+    exits: [
+      { to: 'harrogath', side: 'n' },
+      { to: 'highlands', side: 's' },
+    ],
+  },
+  {
+    id: 'highlands',
+    act: 5,
+    name: 'Frigid Highlands',
+    kind: 'outdoor',
+    terrain: 'snow',
+    pathTerrain: 'dirt',
+    wallTerrain: 'snow',
+    areaLevel: 36,
+    ambient: [78, 86, 104],
+    size: 76,
+    waypoint: true,
+    props: ['icicle', 'rock', 'frozencorpse', 'tree', 'bones'],
+    propDensity: 0.06,
+    packs: 13,
+    monsters: [
+      { id: 'enslaved', weight: 3, packMin: 4, packMax: 7 },
+      { id: 'frozenhorror', weight: 2, packMin: 1, packMax: 3 },
+      { id: 'succubus', weight: 2, packMin: 1, packMax: 3 },
+    ],
+    exits: [
+      { to: 'foothills', side: 'n' },
+      { to: 'plateau', side: 's' },
+    ],
+  },
+  {
+    id: 'plateau',
+    act: 5,
+    name: 'Arreat Plateau',
+    kind: 'outdoor',
+    terrain: 'snow',
+    pathTerrain: 'dirt',
+    wallTerrain: 'ice',
+    areaLevel: 37,
+    ambient: [76, 86, 106],
+    size: 76,
+    props: ['icicle', 'icicle', 'rock', 'frozencorpse', 'banner'],
+    propDensity: 0.07,
+    packs: 14,
+    monsters: [
+      { id: 'moonlord', weight: 2, packMin: 1, packMax: 3 },
+      { id: 'frozenhorror', weight: 2, packMin: 1, packMax: 3 },
+      { id: 'deathminion', weight: 3, packMin: 3, packMax: 5 },
+    ],
+    exits: [
+      { to: 'highlands', side: 'n' },
+      { to: 'crystalline', side: 's', kind: 'stairs' },
+    ],
+  },
+  {
+    id: 'crystalline',
+    act: 5,
+    name: 'Crystalline Passage',
+    kind: 'dungeon',
+    terrain: 'ice',
+    wallTerrain: 'ice',
+    areaLevel: 38,
+    ambient: [30, 36, 48],
+    size: 56,
+    depth: 2,
+    waypoint: true,
+    props: ['icicle', 'frozencorpse', 'rock', 'bones'],
+    packs: 13,
+    monsters: [
+      { id: 'frozenhorror', weight: 3, packMin: 2, packMax: 3 },
+      { id: 'succubus', weight: 2, packMin: 1, packMax: 3 },
+      { id: 'moonlord', weight: 2, packMin: 1, packMax: 3 },
+    ],
+    exits: [
+      { to: 'plateau', kind: 'stairs' },
+      { to: 'ancientsway', kind: 'stairs' },
+    ],
+  },
+  {
+    id: 'ancientsway',
+    act: 5,
+    name: "The Ancients' Way",
+    kind: 'outdoor',
+    terrain: 'snow',
+    pathTerrain: 'cobble',
+    wallTerrain: 'ice',
+    areaLevel: 39,
+    ambient: [72, 82, 102],
+    size: 72,
+    props: ['icicle', 'column', 'banner', 'rock', 'frozencorpse'],
+    propDensity: 0.07,
+    packs: 13,
+    quest: 'ancients',
+    boss: 'ancient',
+    monsters: [
+      { id: 'moonlord', weight: 2, packMin: 2, packMax: 3 },
+      { id: 'deathminion', weight: 3, packMin: 3, packMax: 5 },
+      { id: 'frozenhorror', weight: 2, packMin: 1, packMax: 3 },
+    ],
+    exits: [
+      { to: 'crystalline', side: 'n', kind: 'stairs' },
+      { to: 'worldstone', side: 's', kind: 'stairs' },
+    ],
+  },
+  {
+    id: 'worldstone',
+    act: 5,
+    name: 'Worldstone Keep',
+    kind: 'dungeon',
+    terrain: 'ice',
+    wallTerrain: 'obsidian',
+    areaLevel: 40,
+    ambient: [26, 30, 42],
+    size: 62,
+    depth: 3,
+    waypoint: true,
+    props: ['column', 'icicle', 'banner', 'bones'],
+    packs: 15,
+    monsters: [
+      { id: 'moonlord', weight: 2, packMin: 2, packMax: 3 },
+      { id: 'succubus', weight: 2, packMin: 2, packMax: 3 },
+      { id: 'deathminion', weight: 3, packMin: 3, packMax: 5 },
+      { id: 'frozenhorror', weight: 1, packMin: 1, packMax: 2 },
+    ],
+    exits: [
+      { to: 'ancientsway', kind: 'stairs' },
+      { to: 'throne', kind: 'stairs' },
+    ],
+  },
+  {
+    id: 'throne',
+    act: 5,
+    name: 'Throne of Destruction',
+    kind: 'dungeon',
+    terrain: 'obsidian',
+    wallTerrain: 'obsidian',
+    areaLevel: 41,
+    ambient: [24, 26, 36],
+    size: 54,
+    depth: 1,
+    // No Lister and no waves: the throne room holds its own garrison and then
+    // Baal, and the last fight in the game is not a summoning minigame.
+    props: ['column', 'brazier', 'banner', 'bones'],
+    packs: 12,
+    quest: 'baal',
+    boss: 'baal',
+    monsters: [
+      { id: 'moonlord', weight: 2, packMin: 2, packMax: 3 },
+      { id: 'succubus', weight: 2, packMin: 2, packMax: 3 },
+      { id: 'deathminion', weight: 3, packMin: 3, packMax: 5 },
+    ],
+    exits: [{ to: 'worldstone', kind: 'stairs' }],
   },
 ];
 
@@ -604,8 +946,8 @@ for (const a of AREAS) AREA_BY_ID[a.id] = a;
 
 // The five acts. `key` is the music's prefix, so an act's three moods are
 // `${key}.town`, `${key}.field` and `${key}.dungeon`. `town` names the area a
-// caravan, a ship or a portal arrives at -- acts 1 to 3 have their real towns,
-// act 4 has the placeholder above, and act 5 is waiting for its areas.
+// caravan, a ship or a portal arrives at, and every one of the five is a real
+// town with its own cast now.
 //
 // `travel` is the passage onward: which townsman sells it, and which quest flag
 // has to be set before he will. Warriv takes the caravan east, Meshif sails
@@ -627,5 +969,6 @@ export const WAYPOINT_AREAS = [
   'town', 'coldplains', 'darkwood', 'catacombs',
   'lutgholein', 'dryhills', 'lostcity',
   'kurast', 'greatmarsh', 'bazaar',
-  'fortress',
+  'fortress', 'damned', 'flame',
+  'harrogath', 'highlands', 'crystalline', 'worldstone',
 ];

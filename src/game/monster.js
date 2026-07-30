@@ -186,6 +186,10 @@ export function spawnBoss(level, bossId, rng, sheets) {
     // The named unique is one third of the Travincal trio; his guard pack of
     // council robes is the other two and then some.
     council: 'councilmember', mephisto: 'councilmember',
+    izual: 'balrog', hephasto: 'urdar', diablo: 'doomknight',
+    shenk: 'enslaved',
+    // The Ancient stands alone by design, and so does Baal: the throne room has
+    // its own garrison spread through it and no summoned waves at the end.
   }[bossId];
   if (guardOf) {
     spawnPack(level, guardOf, rng, {

@@ -280,6 +280,150 @@ export const NPCS = [
       },
     },
   },
+
+  // -------------------------------------------------------- pandemonium fortress
+  {
+    id: 'jamella', name: 'Jamella', title: 'Angel', town: 'fortress',
+    figure: 'akara', at: { dx: -3.5, dy: -5.5 }, face: 3,
+    services: ['heal', 'trade'],
+    greeting: 'Mortal flesh was not made for this air. Let me put you right before you walk out in it.',
+    stockSlots: ['weapon', 'ring', 'amulet', 'body'],
+    stockCaster: true,
+    lines: [
+      'We hold this rock and nothing beyond it. That is the whole of the Fortress.',
+      'Do not look long at the steppes. They look back, and they remember faces.',
+      'Izual was one of us. Whatever wears him now is not, and it should be ended.',
+    ],
+    quest: {
+      izual: {
+        pending: 'Izual walks the Plains of Despair in an angel\'s shape. Free what is left of him.',
+        done: 'Izual is at rest. What he knew of this place is yours now.',
+      },
+    },
+  },
+  {
+    id: 'halbu', name: 'Halbu', title: 'Armourer', town: 'fortress',
+    figure: 'charsi', at: { dx: 4.5, dy: -5.5 }, face: 5,
+    services: ['trade'],
+    greeting: 'Steel from the mortal world, mended in this one. It holds better than you would think.',
+    stockSlots: ['weapon', 'body', 'shield', 'head', 'gloves', 'boots', 'belt'],
+    lines: [
+      'I armour the host. There is little else to do here, and less to do it with.',
+      'Hephasto forges for the other side, and he forges well. Ask his hammer.',
+      'Bring me what hell drops. Half of it is better than what mortals make.',
+    ],
+  },
+  {
+    id: 'cain4', name: 'Deckard Cain', title: 'Last of the Horadrim', town: 'fortress',
+    figure: 'cain', at: { dx: -6.5, dy: 1.5 }, face: 1,
+    services: ['identify'],
+    greeting: 'Stay a while and listen. No Horadrim has stood where we stand and gone home to write it down.',
+    lines: [
+      'The three brothers are two now. Diablo is the youngest and the worst of them.',
+      'This fortress is a foothold, not a fortification. Angels do not build walls.',
+      'Bring me what you find. Even hell labels its work, if you know the hand.',
+    ],
+  },
+  {
+    id: 'tyrael', name: 'Tyrael', title: 'Archangel', town: 'fortress',
+    figure: 'warriv', at: { dx: 2.5, dy: 6.5 }, face: 7,
+    services: ['travel'],
+    // The passage onward is a portal rather than a road, but askPassage does not
+    // care which -- it wants the refusal and the arrival, and it throws if a
+    // travel NPC has neither.
+    passage: {
+      refuse: 'The way to Arreat is not mine to open while Diablo stands. Go down to the Sanctuary.',
+      arrive: 'Harrogath, on the slope of Mount Arreat. Baal is already at the summit.',
+    },
+    greeting: 'I can open the way north when the Lord of Terror is finished. Not before.',
+    lines: [
+      'I broke the Soulstone at Tal Rasha\'s tomb and it changed nothing. That is my share of this.',
+      'Baal marches on the Worldstone. If he touches it, there is no world left to defend.',
+      'You are mortal and therefore permitted what we are not. Use that.',
+    ],
+    quest: {
+      diablo: {
+        pending: 'Diablo holds the Chaos Sanctuary past the River of Flame. End him, and I open the way north.',
+        done: 'Diablo is destroyed. Speak the word and I will open the portal to Harrogath.',
+      },
+    },
+  },
+
+  // --------------------------------------------------------------- harrogath
+  {
+    id: 'malah', name: 'Malah', title: 'Healer', town: 'harrogath',
+    figure: 'akara', at: { dx: -3.5, dy: -5.5 }, face: 3,
+    services: ['heal', 'trade'],
+    greeting: 'Sit by the fire and let me look at you. The cold hides more wounds than it closes.',
+    stockSlots: ['weapon', 'ring', 'amulet', 'head'],
+    stockCaster: true,
+    lines: [
+      'We were a city of five thousand. Count the roofs and tell me what we are now.',
+      'Nihlathak bargained with the siege. Do not say his name near Qual-Kehk.',
+      'Anya is worth more to this town than the wall is. Bring her home safe.',
+    ],
+  },
+  {
+    id: 'larzuk', name: 'Larzuk', title: 'Weaponsmith', town: 'harrogath',
+    figure: 'charsi', at: { dx: 4.5, dy: -5.5 }, face: 5,
+    services: ['trade'],
+    greeting: 'You break it out there, I mend it in here. Bring it before it is scrap.',
+    stockSlots: ['weapon', 'body', 'shield', 'head', 'gloves', 'boots', 'belt'],
+    lines: [
+      'My father armed the men on the wall. I arm whoever is left standing on it.',
+      'Shenk drives them up the foothills with a whip. Kill the whip and the drive stops.',
+      'Barbarian steel is heavy on purpose. So is Arreat.',
+    ],
+    quest: {
+      shenk: {
+        pending: 'Shenk the Overseer is herding them up the Bloody Foothills. Break him and the siege stalls.',
+        done: 'Shenk is dead and the foothills have gone quiet. First good news in a season.',
+      },
+    },
+  },
+  {
+    id: 'anya', name: 'Anya', title: 'Elder\'s Daughter', town: 'harrogath',
+    figure: 'gheed', at: { dx: 6.5, dy: 1.5 }, face: 5,
+    services: ['gamble', 'trade'],
+    greeting: 'I keep what the dead no longer need. Wager on it if you like -- the mountain does.',
+    stockSlots: ['ring', 'amulet', 'belt', 'gloves', 'boots'],
+    lines: [
+      'My father held the eastern gate until it stopped mattering which gate you held.',
+      'Everything in this chest came off the wall. I would rather sell it than bury it.',
+      'Take the wager. In Harrogath, certainty is the expensive thing.',
+    ],
+  },
+  {
+    id: 'qualkehk', name: 'Qual-Kehk', title: 'Barracks Captain', town: 'harrogath',
+    figure: 'kashya', at: { dx: -1.5, dy: 6.5 }, face: 7,
+    services: [],
+    greeting: 'Another outlander. The last three are frozen into the Frigid Highlands. Do better.',
+    greetingByClass: {
+      barbarian: 'One of our own, at last. The last three outlanders are frozen into the highlands. Do better.',
+    },
+    lines: [
+      'I have buried more of my men than I command. Ask me again about honour.',
+      'The Ancients guard the way to the summit. They test whoever climbs, and they do not grade kindly.',
+      'Baal is on Arreat. Everything else is a detail of the siege.',
+    ],
+    quest: {
+      ancients: {
+        pending: 'The Ancients bar the Ancients\' Way to anyone unproven. Face what stands there.',
+        done: 'You passed the Ancients\' judgement. The summit is open, for whatever that is worth.',
+      },
+    },
+  },
+  {
+    id: 'cain5', name: 'Deckard Cain', title: 'Last of the Horadrim', town: 'harrogath',
+    figure: 'cain', at: { dx: -6.5, dy: 1.5 }, face: 1,
+    services: ['identify'],
+    greeting: 'Stay a while and listen. The Worldstone is above us, and Baal is climbing toward it.',
+    lines: [
+      'The Worldstone keeps this world separate from theirs. Corrupt it and the separation ends.',
+      'Baal was bound in Tal Rasha. He has been walking free for longer than anyone admits.',
+      'Bring me what you find. Even at the end of the world, a name is worth having.',
+    ],
+  },
 ];
 
 export const NPC_BY_ID = {};

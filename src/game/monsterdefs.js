@@ -145,6 +145,75 @@ export const MONSTERS = {
     bolt: { element: 'fire', min: 7, max: 14, speed: 10, colour: '#ff7a30' },
   },
 
+  // --------------------------------------------------------------- act 4 hell
+  // Hell is met at area level 28 and up, so these are written at level 1 like
+  // everything else and let the scaling do the act's work. What changes in hell
+  // is not the numbers but the resistances: fire is nearly useless here.
+  doomknight: {
+    id: 'doomknight', name: 'Doom Knight', figure: 'doomknight',
+    hp: 46, dmg: [7, 14], ar: 60, def: 26, speed: 4.0, xp: 32,
+    radius: 0.32, ai: 'melee', wake: 13, attackRange: 1.1, attackCooldown: 1.0,
+    resists: { fire: 50, phys: 15 },
+  },
+  oblivionknight: {
+    // The same armour with a book instead of a shield: it keeps behind the line
+    // and raises the knights that fall in front of it.
+    id: 'oblivionknight', name: 'Oblivion Knight', figure: 'oblivionknight',
+    hp: 40, dmg: [6, 12], ar: 48, def: 24, speed: 3.0, xp: 48,
+    radius: 0.32, ai: 'caster', wake: 14, attackRange: 8.5, attackCooldown: 1.9,
+    resists: { fire: 50, cold: 50, pois: 100 }, special: 'resurrect', keepDistance: 5,
+    bolt: { element: 'cold', min: 8, max: 16, speed: 9, colour: '#9ad8ff' },
+  },
+  balrog: {
+    id: 'balrog', name: 'Balrog', figure: 'balrog',
+    hp: 66, dmg: [10, 19], ar: 62, def: 28, speed: 3.6, xp: 52,
+    radius: 0.42, ai: 'melee', wake: 14, attackRange: 1.4, attackCooldown: 1.25,
+    resists: { fire: 100, cold: -25 }, enchant: 'fire',
+  },
+  urdar: {
+    // A mauler: slow, enormously heavy, and the one thing in the act that will
+    // out-trade a barbarian toe to toe.
+    id: 'urdar', name: 'Urdar', figure: 'urdar',
+    hp: 80, dmg: [12, 22], ar: 56, def: 32, speed: 2.6, xp: 46,
+    radius: 0.42, ai: 'melee', wake: 11, attackRange: 1.45, attackCooldown: 1.6,
+    resists: { fire: 50, phys: 25, light: -25 },
+  },
+
+  // -------------------------------------------------------------- act 5 arreat
+  enslaved: {
+    id: 'enslaved', name: 'Enslaved', figure: 'enslaved',
+    hp: 40, dmg: [7, 14], ar: 62, def: 22, speed: 5.0, xp: 36,
+    radius: 0.28, ai: 'melee', wake: 14, attackRange: 0.95, attackCooldown: 0.85,
+    resists: { fire: 50 }, flees: true,
+  },
+  deathminion: {
+    id: 'deathminion', name: 'Death Minion', figure: 'deathminion',
+    hp: 72, dmg: [11, 20], ar: 64, def: 30, speed: 3.4, xp: 48,
+    radius: 0.38, ai: 'melee', wake: 12, attackRange: 1.3, attackCooldown: 1.35,
+    resists: { cold: 50, phys: 15 },
+  },
+  succubus: {
+    // She blights rather than burns: the bolt is cold, she never closes, and a
+    // pack of them at range is what makes the highlands frightening.
+    id: 'succubus', name: 'Succubus', figure: 'succubus',
+    hp: 50, dmg: [8, 15], ar: 54, def: 26, speed: 4.2, xp: 56,
+    radius: 0.30, ai: 'caster', wake: 15, attackRange: 9.5, attackCooldown: 1.8,
+    resists: { cold: 50, light: 25 }, keepDistance: 6,
+    bolt: { element: 'cold', min: 9, max: 18, speed: 10, colour: '#b0a0ff' },
+  },
+  frozenhorror: {
+    id: 'frozenhorror', name: 'Frozen Horror', figure: 'frozenhorror',
+    hp: 88, dmg: [12, 23], ar: 58, def: 34, speed: 2.8, xp: 58,
+    radius: 0.44, ai: 'melee', wake: 12, attackRange: 1.5, attackCooldown: 1.5,
+    resists: { cold: 100, fire: -25 }, enchant: 'cold',
+  },
+  moonlord: {
+    id: 'moonlord', name: 'Moon Lord', figure: 'moonlord',
+    hp: 78, dmg: [13, 24], ar: 70, def: 34, speed: 3.8, xp: 62,
+    radius: 0.42, ai: 'melee', wake: 14, attackRange: 1.4, attackCooldown: 1.2,
+    resists: { fire: 75, light: 25 },
+  },
+
   // ------------------------------------------------------------------ bosses
   corpsefire: {
     id: 'corpsefire', name: 'Corpsefire', figure: 'corpsefire',
@@ -217,6 +286,65 @@ export const MONSTERS = {
     radius: 0.48, ai: 'boss', wake: 20, attackRange: 1.7, attackCooldown: 1.0,
     resists: { pois: 100, fire: 40, cold: 20, light: 20 }, boss: true, aura: '#8aff3a',
     special: 'andariel', freezeImmune: true,
+  },
+  izual: {
+    // A fallen angel, and the only cold thing in hell: the reskin is blue for a
+    // reason. Not a gate -- killing him is the act's optional bounty -- so he is
+    // written a shade under Hephasto.
+    id: 'izual', name: 'Izual', figure: 'izual',
+    hp: 1600, dmg: [17, 32], ar: 150, def: 62, speed: 4.0, xp: 4600,
+    radius: 0.50, ai: 'melee', wake: 20, attackRange: 1.7, attackCooldown: 1.0,
+    resists: { cold: 100, fire: 40, pois: 100 }, boss: true, aura: '#8ad8ff',
+    enchant: 'cold', freezeImmune: true,
+    mods: ['Cold Enchanted', 'Extra Fast'],
+  },
+  hephasto: {
+    // The Smith's older brother in every sense: the same slow hammer, hell's
+    // resistances, and a river of flame to fight him beside.
+    id: 'hephasto', name: 'Hephasto the Armourer', figure: 'hephasto',
+    hp: 1800, dmg: [20, 38], ar: 165, def: 74, speed: 2.8, xp: 5400,
+    radius: 0.48, ai: 'melee', wake: 17, attackRange: 1.6, attackCooldown: 1.45,
+    resists: { fire: 90, phys: 25, light: 40 }, boss: true, aura: '#ff8a3a',
+    mods: ['Extra Strong', 'Stone Skin'],
+  },
+  diablo: {
+    // The gate of act four. Fire on every blow and fast enough that the doorway
+    // is no longer an answer -- the Chaos Sanctuary is meant to be survived by
+    // resistances and potions rather than geometry.
+    id: 'diablo', name: 'Diablo', figure: 'diablo',
+    hp: 2600, dmg: [22, 40], ar: 190, def: 84, speed: 4.4, xp: 7200,
+    radius: 0.56, ai: 'melee', wake: 22, attackRange: 1.9, attackCooldown: 0.95,
+    resists: { fire: 85, cold: 50, light: 50, pois: 75 }, boss: true, aura: '#ff4a2a',
+    enchant: 'fire', freezeImmune: true,
+  },
+  shenk: {
+    // A siege overseer, so his numbers are the act's welcome rather than its
+    // wall: a unique Death Minion with a whip and a hill to hold.
+    id: 'shenk', name: 'Shenk the Overseer', figure: 'deathminion',
+    hp: 1500, dmg: [16, 30], ar: 155, def: 66, speed: 3.6, xp: 5000,
+    radius: 0.42, ai: 'melee', wake: 18, attackRange: 1.5, attackCooldown: 1.2,
+    resists: { cold: 50, fire: 50, phys: 20 }, boss: true, aura: '#c86a2a',
+    mods: ['Extra Strong', 'Extra Fast'],
+  },
+  ancient: {
+    // One guardian on the way, not the canon three: bronze, patient, and immune
+    // to nothing in particular, which makes him the fairest boss in the act.
+    id: 'ancient', name: 'Talic the Defender', figure: 'ancient',
+    hp: 2000, dmg: [22, 40], ar: 175, def: 90, speed: 3.8, xp: 6200,
+    radius: 0.46, ai: 'melee', wake: 19, attackRange: 1.7, attackCooldown: 1.1,
+    resists: { cold: 75, phys: 25, light: 25 }, boss: true, aura: '#c8a03a',
+    mods: ['Stone Skin', 'Extra Strong'],
+  },
+  baal: {
+    // The end of the road. A caster to close the game because every other act
+    // boss was met in melee: he holds the middle of the throne room, throws
+    // homing cold, and there is no pack of his own kind to hide behind.
+    id: 'baal', name: 'Baal', figure: 'baal',
+    hp: 3000, dmg: [26, 46], ar: 200, def: 92, speed: 3.4, xp: 9000,
+    radius: 0.56, ai: 'caster', wake: 24, attackRange: 11, attackCooldown: 1.15,
+    resists: { cold: 85, fire: 60, light: 60, pois: 100 }, boss: true, aura: '#7ae0ff',
+    freezeImmune: true, keepDistance: 6,
+    bolt: { element: 'cold', min: 18, max: 34, speed: 12, colour: '#a0e8ff', homing: 0.75 },
   },
 };
 

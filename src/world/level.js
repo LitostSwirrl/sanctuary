@@ -27,6 +27,7 @@ export class Level {
 
     this.tiles = new Uint8Array(w * h);
     this.solid = new Uint8Array(w * h);   // blocked by a prop standing here
+    this.lavaTiles = [];  // tiles the River of Flame runs through: solid, and not a prop's doing
 
     this.props = [];      // { name, x, y, seed, light }
     this.entities = [];   // monsters and the player

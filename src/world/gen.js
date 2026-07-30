@@ -107,6 +107,10 @@ function propSafe(lv, x, y) {
 const LIGHT_COLORS = {
   brazier: { r: 5.5, cr: 255, cg: 150, cb: 70 },
   torch: { r: 4.5, cr: 255, cg: 155, cb: 80 },
+  // A vent is a hole in the floor with the river underneath it, so it burns
+  // brighter and redder than a brazier and lights the whole channel it stands
+  // in. Without an entry here the prop is baked, drawn, and dark.
+  lavavent: { r: 5.5, cr: 255, cg: 106, cb: 36 },
   waypoint: { r: 6, cr: 180, cg: 110, cb: 255, flicker: false },
   portal: { r: 7, cr: 180, cg: 110, cb: 255, flicker: false },
 };
@@ -152,9 +156,67 @@ function verifyReachable(lv) {
   if (!bad) return;
   // The tiles were already verified connected when the region was chosen, so a
   // prop is what closed the way. Give up prop collision for this level: walking
-  // through a crate is invisible next to an exit nobody can reach.
+  // through a crate is invisible next to an exit nobody can reach. Lava is the
+  // one block that survives the amnesty -- it was proven not to seal anything
+  // when it was poured, and walking across the River of Flame is not invisible.
   lv.solid.fill(0);
   for (const p of lv.props) p.solid = false;
+  for (const i of lv.lavaTiles || []) lv.solid[i] = 1;
+}
+
+// ----------------------------------------------------------------------- lava
+// The River of Flame, and the Chaos Sanctuary's channels of it. There is no
+// unwalkable-liquid tile in the grid -- FLOOR and PATH are the only walkable
+// values and neither carries a hazard -- so lava is laid the way the design's
+// fallback says: the strip's tiles are marked solid, which is the same block
+// a barrel uses, and vents are dropped along it for the glow and the light.
+//
+// A strip is laid tentatively and taken back if it seals anything off. That is
+// the whole reason this runs before the props do: `verifyReachable` answers a
+// prop-sealed level by dropping ALL prop collision, which would quietly melt
+// the river away with it. Checking each strip on its own keeps the guarantee
+// without ever needing that hammer.
+function pourLava(lv, rng, keyPoints) {
+  const mustReach = keyPoints.filter(Boolean);
+  const strips = 4 + rng.i(4);
+  let laid = 0;
+  for (let s = 0; s < strips; s++) {
+    const len = 9 + rng.i(10);
+    const half = rng.chance(0.4) ? 1 : 0;
+    const a = rng.f() * Math.PI * 2;
+    let x = 3 + rng.i(lv.w - 6), y = 3 + rng.i(lv.h - 6);
+    const marked = [];
+    for (let step = 0; step < len; step++) {
+      const px = Math.round(x + Math.cos(a) * step);
+      const py = Math.round(y + Math.sin(a) * step);
+      for (let dy = -half; dy <= half; dy++) {
+        for (let dx = -half; dx <= half; dx++) {
+          const tx = px + dx, ty = py + dy;
+          if (!lv.inBounds(tx, ty) || lv.tileAt(tx, ty) !== FLOOR) continue;
+          const i = ty * lv.w + tx;
+          if (lv.solid[i]) continue;
+          // Nothing burns where the player arrives, where a door is, or where
+          // the boss waits: those tiles have to be stood on.
+          if (mustReach.some((p) => Math.hypot(p.x - tx, p.y - ty) < 4)) continue;
+          lv.solid[i] = 1;
+          marked.push(i);
+        }
+      }
+    }
+    if (!marked.length) continue;
+    const seen = walkableFlood(lv, Math.floor(lv.start.x), Math.floor(lv.start.y));
+    const sealed = mustReach.some((p) => !seen[Math.floor(p.y) * lv.w + Math.floor(p.x)]);
+    if (sealed) { for (const i of marked) lv.solid[i] = 0; continue; }
+    for (const i of marked) lv.lavaTiles.push(i);
+    // Vents every few tiles along the channel, on tiles the strip already owns.
+    for (let k = 0; k < marked.length; k += 4 + rng.i(3)) {
+      const i = marked[k];
+      lv.addProp('lavavent', (i % lv.w) + 0.5, ((i / lv.w) | 0) + 0.5, rng.i(1000),
+        { solid: true, light: LIGHT_COLORS.lavavent });
+    }
+    laid++;
+  }
+  return laid;
 }
 
 // ------------------------------------------------------------------ outdoor
@@ -323,6 +385,10 @@ export function genDungeon(seed, def) {
     lv.exits.push({ x: p.x + 0.5, y: p.y + 0.5, to: ex.to, kind: ex.kind || 'stairs' });
     if (i > 0) placeProp(lv, 'stairs', p.x, p.y, rng, false);
   });
+
+  // The lava goes down before the scenery does, and keeps clear of the doors
+  // and the boss's floor.
+  if (def.lava) pourLava(lv, rng, [lv.start, lv.bossPoint, ...lv.exits]);
 
   // Torches on walls, columns and rubble inside rooms.
   for (const r of rooms) {
