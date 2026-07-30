@@ -192,8 +192,11 @@ export function spawnBoss(level, bossId, rng, sheets) {
     // its own garrison spread through it and no summoned waves at the end.
   }[bossId];
   if (guardOf) {
+    // The Travincal trio is a named unique and an elite guard, not a rabble,
+    // so the council alone spawns its escort as champions.
     spawnPack(level, guardOf, rng, {
-      at: p, count: 4, sheets, mlvl: (level.areaLevel || 1) + 1, rank: 'normal',
+      at: p, count: 4, sheets, mlvl: (level.areaLevel || 1) + 1,
+      rank: bossId === 'council' ? 'champion' : 'normal',
     });
   }
   return boss;

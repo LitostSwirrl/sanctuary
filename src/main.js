@@ -525,8 +525,11 @@ function resurrect() {
   player.mana = player.maxMana;
   player.setAnim('idle', { force: true });
   state = 'playing';
-  enterArea('town', null, true);
-  ui.say('You wake in the encampment. Your gold lies where you fell.', 4);
+  // You wake in the town of the act you died in, not back at the first one --
+  // dying in the Worldstone Keep should not undo four acts of travel.
+  const act = ACTS.find((a) => a.num === AREA_BY_ID[areaId].act) || ACTS[0];
+  enterArea(act.town, null, true);
+  ui.say(`You wake in ${act.name}. Your gold lies where you fell.`, 4);
 }
 
 // ------------------------------------------------------------------- action

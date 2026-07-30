@@ -76,17 +76,20 @@ export function maxManaFor(cls, level, ene, bonusFlat = 0, bonusPct = 0) {
 
 // ---------------------------------------------------------------- experience
 
-// Shaped like the original's curve rather than copied from its table: a smooth
-// power law. Which is why the cap moving from 30 to 50 asked nothing of it -- a
-// law is not a table, so it already had a value at 49, and the same shape
-// carries the whole five-act climb. 296,857 to stand at 30; 941,247 to stand at
-// 50, a little over three times as far for twenty more levels, with each level
-// costing about a thousand more than the one before it. The two constants are
-// the pacing lever and belong to the pacing pass, which tunes them against
-// real kill paths rather than against arithmetic.
+// Shaped like the original's curve rather than copied from its table: a flat
+// toll every level pays, plus a power law that takes over once the toll stops
+// mattering. The toll is what makes the first act cost something -- a pure
+// power law starts so cheap that a Blood Moor detour is worth two levels -- and
+// the exponent is what stops hell and the barrens, where a single corpse is
+// worth more than the whole Cold Plains, from handing out a level an area.
+// 43,466 to stand at 13, where Andariel waits; 496,646 at 30; 2,633,820 at 50.
+// The three constants are the pacing lever, tuned in the pacing pass against
+// recorded kill paths rather than against arithmetic: a scripted classic hero
+// killing about half of what he meets down the golden path meets Andariel at
+// 14, Duriel at 20-21, Mephisto at 27, Diablo at 34-35 and Baal at 43-44.
 export function xpForLevel(n) {
   if (n <= 1) return 0;
-  return Math.floor(180 * Math.pow(n - 1, 2.2));
+  return Math.floor(1600 * (n - 1) + 6.5 * Math.pow(n - 1, 3.31));
 }
 
 export function xpToNext(level) {
