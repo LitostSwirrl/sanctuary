@@ -78,6 +78,7 @@ function wrapNoise(rng, pw, ph, cell) {
 }
 
 const clampB = (v) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
+// Hardcodes alpha 255, so only ever feed it a texel that is already opaque.
 const mulC = (c, k) => packRGB(clampB((c & 255) * k), clampB(((c >>> 8) & 255) * k), clampB(((c >>> 16) & 255) * k), 255);
 
 // How hard the per-pixel grain bites, as the peak fraction of a texel's value
@@ -104,7 +105,7 @@ function grainOverlay(buf, salt) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
       const c = data[i];
-      if (!(c >>> 24)) continue;
+      if ((c >>> 24) !== 255) continue;
       let hh = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ salt) >>> 0;
       hh = Math.imul(hh ^ (hh >>> 13), 2246822519) >>> 0;
       hh ^= hh >>> 16;
