@@ -307,3 +307,42 @@ Phase log (What/Why/Next per phase):
   `a1`-`a5` x `.town/.field/.dungeon`; the +5 dB score presence is one constant
   (`MUSIC_LEVEL`, synth.js) if it sits too loud in the mix.
   Next: Phase 3, both classes to their canon thirty (plan Tasks 3-6).
+- **Phase 3, sixty skills (done, 2026-07-30)**: both classes hold their canon
+  thirty. What: Task 3 laid the machinery (hazards, pets, chain/beam/thrown,
+  buff hooks with plusSkills/proc/stacks/onStruck, taunt that refuses bosses,
+  corpse targeting); Task 4 the Sorceress's sixteen with req moves on her
+  fourteen; Task 5 the Barbarian's sixteen plus polearm and spear bases; Task 6
+  a six-tier tree panel with a scrolling bind picker. Gate swept 60/60: every
+  skill allocated through the real panel, every castable spends exactly its
+  printed mana, every effect measures true to its tooltip, old saves load
+  byte-equal. Why the fix rounds: Task 4's damage-per-mana anchors were argued
+  from arithmetic instead of measurement (meteor priced without its burn) --
+  the round established the standing evidence bar: anchors are measured at a
+  declared frame, and Blizzard/Thunder Storm were retuned on the corrected
+  numbers; Task 5's round repaired a dangling else that put a Sorceress row on
+  the Barbarian's sheet and made Battle Command's +1 leak permanently into
+  cached passives (caches now read a buff-free level). A session crash mid-
+  Task-4 (the July 29 API incident) was recovered from the ledger: the fix
+  round finished on a Fable worker after the Opus lane died five times --
+  ruling ledgered, the model split's floor is a floor. Deferred minors ride
+  the SDD ledger for final-review triage (equip path never refreshes passive
+  caches; meteor detonates on the cast frame when aimed dead-on; per-cache
+  tooltip rule). Next: Phase 4, the act model and Act 1 at full density (plan
+  Tasks 7-8).
+- **Phase 4, the act model and Act 1 at full density (done, 2026-07-30)**: the
+  world knows about five acts. What: every area carries its act; ACTS drives
+  travel (Warriv's passage east, gated on Andariel, landing in a stub Lut
+  Gholein that Phase 5 replaces); level cap 50 with the existing xp curve
+  simply continued; save v2 with a one-place migration and the act field as a
+  high-water mark; Act 1 grew to eight areas (Dark Wood, the Barracks, The
+  Smith on its deepest floor) with the catacombs rewired behind them; the
+  waypoint panel grew five act tabs; killing Andariel no longer ends the game
+  -- she is act one's gate now, and the won screen waits for Baal. Along the
+  way a pre-existing bug died: dying no longer refunds your own gold in the
+  same frame (the walk-up pass now belongs to the living). Why: Task 7 read
+  the xp formula and changed only a false comment -- the power law already
+  priced 31-50; the save migration was designed once and reused; travelToAct
+  is data-driven off ACTS so acts three through five need only defs and a
+  town. All four reviews clean with zero fix rounds; every number reproduced
+  empirically by independent reviewers. Next: Phase 5, acts two and three
+  (art then world, sequentially -- the desert, the jungle, Duriel, Mephisto).
