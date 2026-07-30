@@ -15,13 +15,15 @@ import { AREA_BY_ID } from './world/levels.js';
 const KEY = 'sanctuary.save.v1';
 const VERSION = 2;
 
-// Which act a record belongs to. The area id is the authority on that -- the
-// area defs carry the act -- so a v1 record is not missing the information, only
-// leaving it unsaid. That is why the migration below is a default and never a
-// guess.
-function actFor(areaId) {
+// Which act a record has reached: the high-water mark travel raises, floored by
+// the act the character is standing in. One field, not two, because the two
+// notions differ only after a waypoint back and the floor settles that -- and
+// because the area id is the authority on the floor, so a v1 record is not
+// missing the information, only leaving it unsaid. That is why the migration
+// below is a default and never a guess.
+function actFor(areaId, reached = 1) {
   const a = AREA_BY_ID[areaId];
-  return a ? a.act : 1;
+  return Math.max(a ? a.act : 1, reached || 1);
 }
 
 function packItem(it) {
@@ -72,7 +74,7 @@ export function save(game) {
     v: VERSION,
     seed: game.seed,
     area: game.areaId,
-    act: actFor(game.areaId),
+    act: actFor(game.areaId, p.actReached),
     at: { x: +p.x.toFixed(2), y: +p.y.toFixed(2) },
     cls: p.cls,
     level: p.level, xp: Math.round(p.xp),
@@ -147,6 +149,7 @@ export function applyTo(player, d, nextUid) {
   player.rightSkill = d.right || 'firebolt';
   player.waypoints = { ...d.waypoints };
   player.quests = { ...d.quests };
+  player.actReached = actFor(d.area, d.act);
 
   for (const s of EQUIP_SLOTS) player.equipment[s] = unpackItem(d.equipment[s], nextUid);
   player.inventory = [];

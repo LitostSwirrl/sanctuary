@@ -87,6 +87,9 @@ export class Player extends Entity {
 
     this.quests = {};
     this.waypoints = { town: true };
+    // The furthest act reached, which travel raises and nothing lowers. Walking
+    // back to the encampment does not un-cross the desert.
+    this.actReached = 1;
     // id -> { t, mag }, ticked in update. A buff may also carry, and the engine
     // will honour: `plusSkills` (levels added to every skill while it lasts),
     // `esplit` (the share of a blow paid from mana before life), `onStruckChill`

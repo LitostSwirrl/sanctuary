@@ -265,7 +265,7 @@ function segments(spec, j, R, anim, t, a) {
   // A two-handed weapon is held in both hands: pull the left hand onto the
   // haft below the right. Mutating the joint here means the left forearm
   // capsule drawn later already points at the grip.
-  if (spec.weapon === 'greataxe') {
+  if (spec.weapon === 'greataxe' || spec.weapon === 'hammer') {
     const A = j.armR;
     const dxw = A.hand[0] - A.elbow[0], dyw = A.hand[1] - A.elbow[1], dzw = A.hand[2] - A.elbow[2];
     const lw = Math.hypot(dxw, dyw, dzw) || 1;
@@ -409,6 +409,16 @@ function segments(spec, j, R, anim, t, a) {
       // Back spike for silhouette.
       const spk = [hp[0], hp[1] - 2.6 * S, hp[2] + 0.5 * S];
       add('capsule', [hp, spk, 1.6 * S, 0.5 * S], R.metal, dep(hp, spk) + 0.64);
+    } else if (W === 'hammer') {
+      // A smith's maul: a thick haft on the forearm line and a squat iron head
+      // laid across the top of it. Blunt on both faces, which is what tells it
+      // apart from the barbarian's axe at sixty pixels.
+      const a1 = at(-4), a2 = at(12);
+      add('capsule', [a1, a2, 1.9 * S, 1.5 * S], R.wood || R.cloth2, dep(a1, a2) + 0.6);
+      const hp = at(10);
+      const f1 = [hp[0], hp[1] - 3.4 * S, hp[2] + 0.6 * S];
+      const f2 = [hp[0], hp[1] + 3.4 * S, hp[2] + 0.6 * S];
+      add('capsule', [f1, f2, 3.1 * S, 3.1 * S], R.metal, dep(f1, f2) + 0.65);
     } else if (W === 'club') {
       const a1 = at(-3), a2 = at(11);
       add('capsule', [a1, a2, 1.1 * S, 2.6 * S], R.wood || R.cloth2, dep(a1, a2) + 0.6);
@@ -718,6 +728,34 @@ export const FIGURE_SPECS = {
     eyeColor: '#ffee6a', eyeGlow: true,
     anims: ['idle', 'walk', 'attack', 'death'],
     build: { ...IMP_BUILD, torsoR: 7.0, headR: 8.4, shoulder: 10.5 },
+  }),
+
+  // The Smith. Wider than the barbarian and half a head shorter, which is the
+  // silhouette of somebody who has spent a life at an anvil: soot-grey hide, a
+  // leather apron, ember in the eyes and both hands on the maul.
+  smith: humanoid({
+    // The maul is the only bright thing on him: steel head, tan haft. Painted
+    // any darker it disappears into the apron at sixty pixels.
+    palette: {
+      skin: '#6d5b50', cloth: '#4a3a2c', cloth2: '#33291f', trim: '#8a6a3a',
+      hair: '#241d16', metal: COLORS.steel, wood: COLORS.leather,
+      bone: COLORS.boneWhite, gem: COLORS.ember, boot: COLORS.leather,
+    },
+    scale: 1.1,
+    parts: { bareArms: true, belt: true },
+    weapon: 'hammer',
+    attackStyle: 'twoHand',
+    eyeColor: '#ff9a2a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD,
+      shoulder: 15.5, torsoR: 8.4, armR: 3.9, foreR: 3.2,
+      upperArm: 11.5, foreArm: 10.5,
+      thigh: 15.5, shin: 14.5,
+      hipU: 31, chestU: 44, neckU: 46, headU: 50, headR: 5.2,
+      thighR: 4.7, shinR: 3.6, hipSide: 6.0,
+      hunch: 0.12, stance: 1.16,
+    },
   }),
 
   bloodraven: humanoid({

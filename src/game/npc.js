@@ -43,6 +43,12 @@ export const NPCS = [
       'Bring me anything you pull off a corpse. I pay fairly, which is more than most.',
       'A wand is a fine thing, but so is thirty pounds of steel.',
     ],
+    quest: {
+      smith: {
+        pending: 'Something is working my forge in the barracks. Whatever it is, it swings my hammer.',
+        done: 'You broke the thing at my forge. I will get my hammer back myself, now the way is quiet.',
+      },
+    },
   },
   {
     id: 'gheed', name: 'Gheed', title: 'Merchant of Curiosities',
@@ -90,7 +96,15 @@ export const NPCS = [
   {
     id: 'warriv', name: 'Warriv', title: 'Caravan Master',
     figure: 'warriv', at: { dx: 2.5, dy: 6.5 }, face: 7,
-    services: [],
+    services: ['travel'],
+    // What he says when asked for the caravan, and what he says on arrival.
+    // Which act his wagons reach, and which flag opens the road, is ACTS's
+    // business rather than his -- Meshif sails twice and will want a line per
+    // destination, so these stay the words and not the route.
+    passage: {
+      refuse: 'The road stays shut while she lives. I will not feed my oxen to her.',
+      arrive: 'Lut Gholein. Two days of dust and not one ambush -- a good crossing.',
+    },
     greeting: 'The road east is closed, friend. Until it opens, my wagons stay where they are.',
     lines: [
       'I have crossed the desert twice. I would rather do it again than walk that monastery.',

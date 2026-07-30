@@ -66,6 +66,17 @@ export const MONSTERS = {
     keepDistance: 6, special: 'raise',
     bolt: { element: 'fire', min: 7, max: 15, speed: 13, colour: '#ff6a30', homing: 0.9 },
   },
+  smith: {
+    id: 'smith', name: 'The Smith', figure: 'smith',
+    // Written so that Extra Strong lands him between Blood Raven and Andariel
+    // rather than above her: 9 to 17 grows to 58-109 by the time he is met.
+    hp: 620, dmg: [9, 17], ar: 105, def: 44, speed: 3.1, xp: 1200,
+    radius: 0.44, ai: 'melee', wake: 15, attackRange: 1.5, attackCooldown: 1.35,
+    // Forge-hardened: fire barely troubles him and the hammer answers steel with
+    // steel. Slow, heavy swings are what make him survivable at all.
+    resists: { fire: 60, phys: 20 }, boss: true, aura: '#ff8a3a',
+    mods: ['Extra Strong', 'Stone Skin'],
+  },
   andariel: {
     id: 'andariel', name: 'Andariel', figure: 'andariel',
     hp: 1500, dmg: [16, 30], ar: 140, def: 58, speed: 3.5, xp: 3200,

@@ -15,6 +15,7 @@ import {
   allocatedPoints, skillLevel, describeSkill, manaCost, stackCount,
 } from '../game/skills.js';
 import { EQUIP_SLOTS } from '../game/player.js';
+import { ACTS, WAYPOINT_AREAS, AREA_BY_ID } from '../world/levels.js';
 
 const CELL = 32;
 
@@ -92,6 +93,31 @@ const PICK = {
   rail: 8,      // right margin the scroll track lives in
 };
 
+// The waypoint panel: a tab per act across the top, that act's waypoints listed
+// under it. Same units again.
+const WP = {
+  w: 330,      // five tabs share this width
+  tabH: 26,
+  rowH: 34,
+  head: 40,    // panel top down to the tab strip
+  gap: 10,     // tab strip down to the first row
+  foot: 30,    // last row down to the panel bottom
+};
+
+const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
+
+// Measured from the waypoint list rather than written out, the way the skill
+// tree measures itself: the act holding the most waypoints says how tall the
+// panel has to be, so acts 3 to 5 arriving cannot overflow it.
+const WP_ROWS = (() => {
+  const per = {};
+  for (const id of WAYPOINT_AREAS) {
+    const a = AREA_BY_ID[id];
+    if (a) per[a.act] = (per[a.act] || 0) + 1;
+  }
+  return Math.max(1, ...Object.values(per));
+})();
+
 export class UI {
   constructor() {
     this.open = null;          // 'inventory' | 'character' | 'skills' | 'vendor' | null
@@ -103,6 +129,7 @@ export class UI {
     this.vendorScroll = 0;     // whole rows scrolled off the top of the shop list
     this.pickerScroll = 0;     // and the same for the skill picker's rows
     this.pickerSide = 'right'; // which mouse button the skill picker is binding
+    this.wpTab = null;         // which act tab the waypoint panel is showing
     this.npc = null;           // whoever is being spoken to
     this.npcSaid = null;       // the line currently on screen
     this.message = null;
@@ -113,8 +140,11 @@ export class UI {
     this.open = this.open === which ? null : which;
     if (this.open !== 'vendor') { this.vendorStock = null; this.vendorScroll = 0; }
     if (this.open !== 'talk' && this.open !== 'vendor' && this.open !== 'gamble') this.npc = null;
+    // A closed waypoint panel forgets which tab was picked, so the next one to
+    // open again preselects the act you are standing in.
+    if (this.open !== 'waypoint') this.wpTab = null;
   }
-  closeAll() { this.open = null; this.npc = null; }
+  closeAll() { this.open = null; this.npc = null; this.wpTab = null; }
 
   // Walking up to someone opens their greeting, not their shop.
   talkTo(npc) {
@@ -583,15 +613,57 @@ export class UI {
 
   // --------------------------------------------------------------- waypoint
 
+  waypointRect(canvasW, canvasH, s) {
+    const w = WP.w * s;
+    const h = (WP.head + WP.tabH + WP.gap + WP_ROWS * WP.rowH + WP.foot) * s;
+    return { x: canvasW / 2 - w / 2, y: canvasH / 2 - h / 2, w, h };
+  }
+
   drawWaypoint(ctx, player, L, mx, my, opts) {
     const s = L.s;
-    const w = 300 * s, h = 260 * s;
-    const x = ctx.canvas.width / 2 - w / 2, y = ctx.canvas.height / 2 - h / 2;
+    const { x, y, w, h } = this.waypointRect(ctx.canvas.width, ctx.canvas.height, s);
     panel(ctx, x, y, w, h);
     panelTitle(ctx, 'Waypoints', x, y, w, s);
 
-    const list = opts.waypointAreas || [];
-    let ty = y + 52 * s;
+    // The act you are standing in is the tab you want nine times in ten, so it
+    // is the one that opens; clicking another remembers itself until the panel
+    // closes.
+    const standing = AREA_BY_ID[opts.currentArea];
+    const act = this.wpTab ?? (standing ? standing.act : 1);
+
+    const areasIn = (num) => WAYPOINT_AREAS
+      .map((id) => AREA_BY_ID[id]).filter((a) => a && a.act === num);
+
+    const tabW = (w - 20 * s) / ACTS.length;
+    ACTS.forEach((a, i) => {
+      const rect = { x: x + 10 * s + i * tabW, y: y + WP.head * s, w: tabW, h: WP.tabH * s };
+      // An act with nothing lit is dim but still readable: it says the road
+      // goes further, and how many stones stand on it.
+      const lit = areasIn(a.num).some((q) => player.waypoints[q.id]);
+      const on = a.num === act;
+      const hovered = this.hovering(rect, mx, my);
+      ctx.fillStyle = on ? 'rgba(96,82,44,0.85)' : hovered ? 'rgba(70,60,36,0.6)' : 'rgba(0,0,0,0.45)';
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.strokeStyle = on ? '#ffe08a' : 'rgba(140,120,70,0.4)';
+      ctx.lineWidth = 1 * s;
+      ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+      ctx.font = `${Math.round(12 * s)}px Georgia, serif`;
+      ctx.fillStyle = on ? '#ffe08a' : lit ? '#c8b070' : '#5f5646';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Act ${ROMAN[i]}`, rect.x + rect.w / 2, rect.y + 17 * s);
+      ctx.textAlign = 'left';
+      this.area(rect, 'wptab', a.num);
+    });
+
+    const list = areasIn(act);
+    let ty = y + (WP.head + WP.tabH + WP.gap) * s;
+    if (!list.length) {
+      ctx.fillStyle = '#5f5646';
+      ctx.font = `${Math.round(12 * s)}px Georgia, serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('No waypoint stands in this act yet.', x + w / 2, ty + 20 * s);
+      ctx.textAlign = 'left';
+    }
     for (const a of list) {
       const known = player.waypoints[a.id];
       const here = a.id === opts.currentArea;
@@ -611,7 +683,7 @@ export class UI {
         ctx.textAlign = 'left';
       }
       if (known && !here) this.area(rect, 'travel', a.id);
-      ty += 34 * s;
+      ty += WP.rowH * s;
     }
     ctx.fillStyle = '#8a7f6a';
     ctx.font = `${Math.round(11 * s)}px Georgia, serif`;
@@ -654,6 +726,7 @@ export class UI {
     if (npc.has('trade')) acts.push({ id: 'trade', label: 'Trade' });
     if (npc.has('heal')) acts.push({ id: 'heal', label: 'Heal' });
     if (npc.has('gamble')) acts.push({ id: 'gamble', label: 'Gamble' });
+    if (npc.has('travel')) acts.push({ id: 'travel', label: 'Travel' });
     if (npc.has('identify')) acts.push({ id: 'identify', label: 'Identify' });
     acts.push({ id: 'leave', label: 'Leave' });
     return acts;
@@ -857,6 +930,8 @@ export class UI {
         return true;
       }
 
+      if (a.kind === 'wptab' && button === 0) { this.wpTab = a.data; return true; }
+
       if (a.kind === 'skill') {
         if (button === 2) {
           if (allocatedPoints(player, a.data) > 0 && !SKILL_BY_ID[a.data].passive) {
@@ -991,6 +1066,18 @@ export class UI {
       return;
     }
 
+    // Asking for passage. Whether the road is open is the act's business, so the
+    // answer comes back from the game: a line means he refused and is still
+    // standing in front of you, nothing means the journey happened and this
+    // panel belongs to a town you have already left.
+    if (id === 'travel') {
+      const refused = this.onAskPassage ? this.onAskPassage(npc, player) : null;
+      if (!refused) return;
+      this.npcSaid = refused;
+      this.open = 'talk';
+      return;
+    }
+
     if (id === 'heal') {
       const full = player.hp >= player.maxHp && player.mana >= player.maxMana;
       player.hp = player.maxHp;
@@ -1112,8 +1199,7 @@ export class UI {
     if (this.open === 'skills') rects.push(L.wide);
     if (this.open === 'talk') rects.push(this.talkRect(ctx.canvasSize.w, ctx.canvasSize.h, ctx.scale));
     if (this.open === 'waypoint') {
-      const w = 300 * ctx.scale, h = 260 * ctx.scale;
-      rects.push({ x: ctx.canvasSize.w / 2 - w / 2, y: ctx.canvasSize.h / 2 - h / 2, w, h });
+      rects.push(this.waypointRect(ctx.canvasSize.w, ctx.canvasSize.h, ctx.scale));
     }
     if (this.open === 'skillpicker' && ctx.player) {
       rects.push(this.pickerRect(ctx.canvasSize.w, ctx.canvasSize.h, ctx.scale, ctx.player));

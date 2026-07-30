@@ -13,7 +13,7 @@ import { bakeTiles, getProp, TILE_BAKE_STEPS } from './art/tiles.js';
 import { bakeAllFigures, FIGURE_BAKE_STEPS } from './art/figures.js';
 import { Particles, FX } from './art/fx.js';
 import { iconFor, bakeIcons, ICON_BAKE_STEPS } from './art/icons.js';
-import { AREAS, AREA_BY_ID, WAYPOINT_AREAS } from './world/levels.js';
+import { AREAS, AREA_BY_ID, WAYPOINT_AREAS, ACTS } from './world/levels.js';
 import { generate } from './world/gen.js';
 import { Renderer } from './render/renderer.js';
 import { drawMinimap } from './render/minimap.js';
@@ -165,9 +165,11 @@ function newGame(cls = 'sorceress') {
   player.skillPoints = 0;
   const statOrder = ['str', 'dex', 'vit', 'ene'];
   for (let i = 0; player.statPoints > 0; i++) player.spendStat(statOrder[i % statOrder.length]);
-  // Money is no object, and every waypoint already knows this hero.
+  // Money is no object, and every waypoint in this act already knows this hero.
+  // Act 1's only: the passage east is Warriv's to sell, and lighting Lut
+  // Gholein's stone here would hand the caravan's job to the waypoint panel.
   player.gold = 9999999;
-  for (const wp of WAYPOINT_AREAS) player.waypoints[wp] = true;
+  for (const wp of WAYPOINT_AREAS) if (AREA_BY_ID[wp].act === 1) player.waypoints[wp] = true;
   for (const slot in BEST_GEAR[cls]) {
     const u = UNIQUE_BY_NAME[BEST_GEAR[cls][slot]];
     player.equipment[slot] = forgeItem(u.base, u.name, u.mods, 30, { rarity: 'unique', flavour: u.flavour });
@@ -219,7 +221,9 @@ function getLevel(id) {
   const lv = generate(def, hashSeed(`${seed}:${id}`));
   if (def.monsters && def.monsters.length) populate(lv, def, lvRng, assets.figures);
   if (def.boss && !player.quests[def.quest]) spawnBoss(lv, def.boss, lvRng, assets.figures);
-  if (lv.townCentre) populateTown(lv, lv.townCentre.x, lv.townCentre.y, assets.figures, player.cls);
+  // Only the encampment has townsfolk so far. The Lut Gholein placeholder is a
+  // set with nobody standing on it until Phase 5 gives it its five.
+  if (lv.townCentre && id === 'town') populateTown(lv, lv.townCentre.x, lv.townCentre.y, assets.figures, player.cls);
   if (def.kind !== 'town') scatterWorldItems(lv, lvRng, 6 + Math.round(def.areaLevel * 0.8));
   levels.set(id, lv);
   return lv;
@@ -262,12 +266,44 @@ function travelTo(id) {
   audio.sfx('portal');
 }
 
+// The passage onward, and the shape every later act reuses: Warriv's caravan,
+// Meshif's ship twice over and Tyrael's portal all do exactly this much. Land in
+// the destination act's town, light its waypoint so the stone is a way back
+// forever after, and raise the high-water mark the save carries.
+function travelToAct(num) {
+  const act = ACTS.find((a) => a.num === num);
+  if (!act || !AREA_BY_ID[act.town]) return false;
+  ui.closeAll();
+  enterArea(act.town, null, true);
+  player.waypoints[act.town] = true;
+  player.actReached = Math.max(player.actReached, num);
+  audio.sfx('portal');
+  save(game);
+  return true;
+}
+
+// Asking a townsman for that passage. Which act's road he is selling and which
+// quest opens it comes from ACTS by way of the area underfoot, so no townsman is
+// named here: whoever stands in an act's town and offers `travel` is that act's
+// caravan master. Returns the line he refuses with, or null once the journey has
+// happened -- and he refuses for all three reasons the same way: there is no
+// road out of this act, the road is shut, or the far end of it is not built yet.
+function askPassage(npc) {
+  const act = ACTS.find((a) => a.num === AREA_BY_ID[areaId].act);
+  const gate = act.travel && act.travel.gateQuest;
+  if (!gate || !player.quests[gate] || !travelToAct(act.num + 1)) return npc.def.passage.refuse;
+  ui.say(npc.def.passage.arrive, 4.5);
+  return null;
+}
+
 // ------------------------------------------------------------------ combat
 
+// A flag, a line, and whatever the deed earns. Some deeds earn only the flag --
+// what the Smith owes you is lying on his floor -- so the reward is optional.
 function grantQuest(name, message, reward) {
   if (player.quests[name]) return;
   player.quests[name] = true;
-  reward();
+  if (reward) reward();
   ui.say(message, 4);
   audio.sfx('quest');
   save(game);
@@ -292,10 +328,13 @@ function killMonster(m) {
     } else if (m.defId === 'bloodraven') {
       grantQuest('raven', 'Blood Raven is put to rest. You feel steadier.',
         () => { player.statPoints += 5; });
+    } else if (m.defId === 'smith') {
+      grantQuest('smith', 'The Smith is broken. The forge is quiet, and what he carried is on the floor.');
     } else if (m.defId === 'andariel') {
-      grantQuest('andariel', 'Andariel is dead. The way beneath the monastery is clear.',
+      // The gate of act one, not the end of the game: her flag is what opens
+      // Warriv's road east. Baal is what sets `won`, in Task 12.
+      grantQuest('andariel', 'Andariel is dead. Warriv will take the caravan east now.',
         () => { player.statPoints += 5; player.skillPoints += 2; });
-      state = 'won';
     }
   }
 }
@@ -898,6 +937,9 @@ function drawDeath() {
   ctx2d.textAlign = 'left';
 }
 
+// Nothing reaches this yet. Andariel used to set `won` and no longer does -- she
+// is act one's gate -- so the screen and the state it draws for are waiting for
+// Baal in Task 12, whose victory will want its own words here.
 function drawWon() {
   const s = uiScale;
   const cx = canvas.width / 2;
@@ -985,9 +1027,9 @@ function drawFrame(fps) {
   drawMinimap(ctx2d, level, player, ui.mapMode ? 'overlay' : 'corner', canvas.width, canvas.height, uiScale);
   hudRegions = drawHUD(ctx2d, player, { scale: uiScale, iconFor, mouse: Input.mouse });
   ui.onTravel = travelTo;
+  ui.onAskPassage = askPassage;
   ui.draw(ctx2d, player, {
     scale: uiScale, mouse: Input.mouse,
-    waypointAreas: WAYPOINT_AREAS.map((id) => AREA_BY_ID[id]),
     currentArea: areaId,
   });
 
