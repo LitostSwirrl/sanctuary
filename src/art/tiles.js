@@ -47,12 +47,19 @@ export const TERRAIN = {
   // black, and what green does reach it belongs to the rot, not the leaves.
   jungle:    { base: '#2b3425', alt: '#232b1e', speck: '#3c4726', rough: 0.30 },
   temple:    { base: '#3c413a', alt: '#333831', speck: '#4a5142', rough: 0.15 },
+  // Hell is not orange. The fortress and the sanctuary are laid obsidian: black
+  // glass with a bruise of warmth in it, and what warmth there is lives in the
+  // cooled cracks rather than on the surface.
+  obsidian:  { base: '#2c252a', alt: '#241e23', speck: '#3a2e2e', rough: 0.16 },
+  // Ice reads by its fractures, not its colour. Kept barely lighter than the
+  // snow it lies under, or a frozen cavern turns into a white room.
+  ice:       { base: '#4e5a66', alt: '#43505c', speck: '#63707c', rough: 0.18 },
 };
 
 // Floors that read as laid masonry: two-tile slabs with a tone step and a
 // joint, rather than dirt. Their walls take courses for the same reason. `cave`
 // is built but not on this list -- its walls are hewn rock and want cracks.
-const BUILT_FLOORS = new Set(['cobble', 'crypt', 'sandstone', 'temple']);
+const BUILT_FLOORS = new Set(['cobble', 'crypt', 'sandstone', 'temple', 'obsidian']);
 
 // ------------------------------------------------------------------- ground
 
@@ -210,6 +217,44 @@ function bakeGroundField(terrain, rng) {
       ellipseF(buf, rd.i(FIELD_W), rd.i(FIELD_H), rd.range(1.5, 4.5), rd.range(1, 2.4), moss);
     }
   }
+  // Obsidian is glass that cracked as it cooled. The veins are darker and warmer
+  // than the floor, never brighter: a lit crack would make the ground its own
+  // light source, and the light pass is what is supposed to sell hell. Wrapped,
+  // because a vein cut at the field edge draws the tile grid back on.
+  if (terrain === 'obsidian') {
+    const vein = packHex('#3d241d'), deep = packHex('#1b1418');
+    for (let i = 0; i < 20; i++) {
+      let x = rd.i(FIELD_W), y = rd.i(FIELD_H);
+      let a = rd.range(0, Math.PI * 2);
+      const len = rd.int(18, 44);
+      for (let k = 0; k < len; k++) {
+        wrapPx(buf, x, y, k % 5 ? vein : deep);
+        wrapPx(buf, x, y + 1, deep);
+        a += rd.range(-0.35, 0.35);
+        x += Math.cos(a) * 1.4; y += Math.sin(a) * 0.7;
+      }
+    }
+  }
+
+  // Ice: fractures pale, air trapped under them paler still. The fracture is the
+  // only thing that says a floor is frozen rather than merely grey, so it is the
+  // one detail here allowed to be lighter than the base.
+  if (terrain === 'ice') {
+    const crack = shift(t.speck, 0.10), bubble = shift(t.speck, 0.04);
+    for (let i = 0; i < 16; i++) {
+      const x0 = rd.i(FIELD_W), y0 = rd.i(FIELD_H);
+      const a = rd.range(0, Math.PI * 2), len = rd.int(24, 60);
+      for (let k = 0; k < len; k++) {
+        // Stepped a pixel at a time, or the crack comes out as a dashed line and
+        // reads as scratches on the screen rather than a split in the floor.
+        wrapPx(buf, x0 + Math.cos(a) * k, y0 + Math.sin(a) * k * 0.5, crack);
+      }
+    }
+    for (let i = 0; i < 40; i++) {
+      ellipseF(buf, rd.i(FIELD_W), rd.i(FIELD_H), rd.range(0.8, 2.0), rd.range(0.6, 1.2), bubble);
+    }
+  }
+
   if (terrain === 'blood') {
     const sp = packRGB(84, 22, 18, 255);
     for (let i = 0; i < 22; i++) {
@@ -302,6 +347,11 @@ const WALL_STYLE = {
   sandstone: { face: '#5d5646', top: '#6a6252', h: 44, built: true },
   jungle:    { face: '#2a3122', h: 34 },
   temple:    { face: '#3a3f38', top: '#454b41', h: 46, built: true },
+  // The fortress is masonry cut from the same glass as its floor, so obsidian
+  // takes courses. Ice walls are not laid by anybody: unbuilt, so the cavern
+  // roof is cut from the floor field and the whole passage reads as one mass.
+  obsidian:  { face: '#2e262b', top: '#382e34', h: 46, built: true },
+  ice:       { face: '#48545f', h: 42 },
 };
 
 // The two visible faces of one block, top left empty. Face texture does not
@@ -883,6 +933,132 @@ function propIdol(rng) {
   return { canvas: bufToCanvas(buf), ox: cx, oy: base };
 }
 
+// --------------------------------------------------------------- hell props
+
+// A shard of the floor stood on end: one tall spike leaning off vertical, with
+// smaller shards at its foot so it reads as something that broke upward rather
+// than a post somebody planted. Facets rather than a round trunk -- glass has
+// flat faces, and the two-tone split down the spike is what says so.
+function propHellspike(rng) {
+  const buf = new Buf(40, 92);
+  const glass = ramp('#2c2529');
+  const cx = 20, base = 84;
+  const lean = rng.range(-6, 6), H = rng.int(46, 66);
+  const tipX = cx + lean, tipY = base - H;
+  const w = rng.range(7, 9);
+  polyF(buf, [cx - w, base, cx, base + w / 2, tipX, tipY], glass.base);
+  polyF(buf, [cx + w, base, cx, base + w / 2, tipX, tipY], glass.dark);
+  polyF(buf, [cx - w, base, cx - w * 0.3, base - 2, tipX, tipY], glass.light);
+  for (let i = 0; i < rng.int(2, 3); i++) {
+    const s = i === 0 ? -1 : 1;
+    const sx = cx + s * rng.range(9, 14), h = rng.range(14, 24);
+    polyF(buf, [sx - 4.5, base, sx, base + 2, sx + rng.range(-2, 2), base - h], glass.base);
+    polyF(buf, [sx + 4.5, base, sx, base + 2, sx, base - h], glass.dark);
+  }
+  // The seams run with the taper, so the facets keep their own edges. One of them
+  // is a cooled crack rather than a shadow: the same warmth the floor veins carry,
+  // which is what ties the spike to the ground it came out of.
+  const seam = packRGB(0, 0, 0, 80);
+  lineP(buf, cx, base, tipX, tipY, seam);
+  lineP(buf, cx - w * 0.45, base - 4, tipX - 1, tipY + 6, packHex('#4a2a1e'));
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: cx, oy: base + 3 };
+}
+
+// A crack in the floor with the melt still in it. Brazier-class light pool: the
+// same hookup the brazier uses, warmer and set lower, because the source is at
+// floor level rather than up on a stand. The molten centre is drawn small --
+// the light pass does the spilling, not the sprite.
+function propLavavent(rng) {
+  const buf = new Buf(48, 34);
+  const rock = ramp('#2a2226');
+  const cx = 24, cy = 22;
+  ellipse(buf, cx, cy, 17, 8, rock);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + rng.range(-0.3, 0.3);
+    ellipse(buf, cx + Math.cos(a) * 12, cy + Math.sin(a) * 5.5, rng.range(3, 5), rng.range(2, 3.2), rock);
+  }
+  ellipseF(buf, cx, cy, 9.5, 4.5, packHex('#5a2410'));
+  ellipseF(buf, cx, cy, 6.5, 3, packHex('#b8400e'));
+  ellipseF(buf, cx, cy - 0.5, 3.6, 1.8, packHex('#ff8a24'));
+  ellipseF(buf, cx, cy - 1, 1.6, 0.9, packHex('#ffd070'));
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: cx, oy: cy + 6, light: { r: 5.5, color: '#ff6a24', dz: 10 } };
+}
+
+// -------------------------------------------------------------- winter props
+
+// A cluster of ice columns grown from the floor: one tall, two short, all
+// tapering to a point, with a lit edge down the near face. Ice is nearly the
+// colour of the wall behind it, so the highlight is the whole read.
+function propIcicle(rng) {
+  const buf = new Buf(40, 74);
+  const ice = ramp('#5e6e7e');
+  const base = 66, cx = 20;
+  const cols = [[0, rng.int(34, 50), 6], [rng.range(-11, -7), rng.int(16, 26), 4], [rng.range(7, 11), rng.int(14, 24), 3.4]];
+  for (const [dx, H, w] of cols) {
+    const x = cx + dx;
+    polyF(buf, [x - w, base, x, base + w / 2, x + rng.range(-1.5, 1.5), base - H], ice.base);
+    polyF(buf, [x + w, base, x, base + w / 2, x, base - H], ice.dark);
+    lineP(buf, x - w + 1, base - 2, x, base - H + 2, ice.light);
+  }
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: cx, oy: base + 3 };
+}
+
+// Somebody who did not make it off the mountain, frosted over where they fell.
+// Read as a body, not a rock: the shape has to keep a head and one arm clear of
+// the mass, and the frost sits on top as a pale rime rather than a snowdrift.
+function propFrozencorpse(rng) {
+  const buf = new Buf(54, 38);
+  const flesh = ramp('#4a4a4e');
+  const rag = ramp('#3a3630');
+  const rime = ramp('#8a99a6');
+  const cx = 26, y = 24;
+  // Torso along the ground, then a head clear of it and two limbs thrown out.
+  // Without the head and the arm this is a boulder, which is exactly what the
+  // first pass looked like at game zoom next to the rocks.
+  ellipse(buf, cx, y, 12, 6, rag);
+  ellipse(buf, cx + 13, y - 5, 5.0, 4.4, flesh);
+  capsule(buf, cx + 9, y - 3, 2.2, cx + 12, y - 9, 1.8, flesh);
+  const a = rng.range(-0.7, 0.3);
+  capsule(buf, cx + 3, y - 3, 2.8, cx - 9 + Math.cos(a) * 4, y - 8 + Math.sin(a) * 4, 1.7, flesh);
+  capsule(buf, cx - 7, y + 1, 3.0, cx - 19, y + rng.range(1, 4), 2.0, rag);
+  capsule(buf, cx - 5, y + 4, 2.6, cx - 14, y + 6, 1.8, rag);
+  for (let i = 0; i < 8; i++) {
+    ellipse(buf, cx + rng.range(-14, 12), y - rng.range(1, 7), rng.range(1.6, 3.4), rng.range(1, 2), rime);
+  }
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: cx, oy: y + 6 };
+}
+
+// A pole with a cloth hung off a crossbar: the tatter along the bottom edge is
+// what tells a banner apart from a signboard at this size. Two cloths, so a row
+// of them along a wall does not read as one stamp repeated.
+function propBanner(rng) {
+  const buf = new Buf(44, 96);
+  const pole = ramp('#3a3026');
+  const cloth = ramp(rng.chance(0.5) ? '#5a2226' : '#33384a');
+  const iron = ramp(COLORS.darkSteel);
+  const cx = 15, base = 88, top = 10;
+  capsule(buf, cx, base, 2.6, cx, top, 2.0, pole);
+  capsule(buf, cx - 1, top + 4, 1.4, cx + 21, top + 6, 1.2, pole);
+  // The cloth hangs from the bar, tapering in and torn along the bottom. Drawn
+  // narrower than this it is a signboard; the tatter is what makes it a banner,
+  // so the teeth are deep enough to survive game zoom.
+  const hang = rng.int(42, 56);
+  polyF(buf, [cx + 1, top + 5, cx + 21, top + 7, cx + 18, top + 7 + hang, cx + 2, top + 5 + hang], cloth.base);
+  polyF(buf, [cx + 1, top + 5, cx + 9, top + 6, cx + 8, top + 6 + hang, cx + 2, top + 5 + hang], cloth.light);
+  for (let i = 0; i < 6; i++) {
+    const x = cx + 3 + i * 2.8;
+    const d = rng.int(4, 11);
+    polyF(buf, [x - 1.4, top + 5 + hang, x + 1.4, top + 5 + hang, x, top + 5 + hang + d], cloth.dark);
+  }
+  ellipse(buf, cx, top - 2, 2.6, 3.2, iron);
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: cx, oy: base + 3 };
+}
+
 const PROP_BAKERS = {
   tree: propTree, rock: propRock, column: propColumn, brazier: propBrazier,
   torch: propTorch, barrel: propBarrel, chest: propChest, gravestone: propGrave,
@@ -892,6 +1068,8 @@ const PROP_BAKERS = {
   palm: propPalm, cactus: propCactus, obelisk: propObelisk,
   sarcophagus: propSarcophagus, urn: propUrn,
   fern: propFern, vine: propVine, idol: propIdol,
+  hellspike: propHellspike, lavavent: propLavavent,
+  icicle: propIcicle, frozencorpse: propFrozencorpse, banner: propBanner,
 };
 
 // Props scattered in numbers need variants or a stand of palms looks stamped.
@@ -899,6 +1077,7 @@ const PROP_BAKERS = {
 const PROP_VARIANTS = new Set([
   'tree', 'rock', 'gravestone', 'bones', 'tent', 'crate', 'palisade',
   'palm', 'cactus', 'fern', 'vine', 'urn',
+  'hellspike', 'lavavent', 'icicle', 'frozencorpse', 'banner',
 ]);
 
 // ------------------------------------------------------------------ exports

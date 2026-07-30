@@ -435,8 +435,12 @@ function segments(spec, j, R, anim, t, a) {
   // spread: a wing held out to full span turns a vulture into a scarecrow, and
   // both wings sit behind the body because at eighty pixels a near wing
   // occluding the chest costs more silhouette than the depth it buys.
+  // `wings: 'broad'` widens the pinions and hangs them shorter and further out.
+  // A bird's narrow pinion on a demon's frame reads as a second set of legs
+  // sprouting from the shoulders -- membrane wants width, feathers want length.
   if (P.wings) {
     const rm = R.wing || R.cape || R.cloth;
+    const broad = P.wings === 'broad';
     const flap = anim === 'idle' || anim === 'walk' ? Math.sin(t * TAU) : 0;
     for (const side of [-1, 1]) {
       const root = [j.chest[0] - 2 * S, side * b.shoulder * S * 0.7, j.chest[2] + 2 * S];
@@ -447,8 +451,13 @@ function segments(spec, j, R, anim, t, a) {
       for (let i = 0; i < 3; i++) {
         const k = i / 2;
         const from = [lerp(root[0], wrist[0], k), lerp(root[1], wrist[1], k), lerp(root[2], wrist[2], k)];
-        const to = [from[0] - (3 + k * 5) * S, from[1] + side * (1 + k * 3) * S, from[2] - (13 + k * 8 - flap * 3) * S];
-        add('capsule', [from, to, 2.8 * S, 1.0 * S], rm, dep(from, to) - 1.5);
+        const drop = broad ? 8 + k * 5 - flap * 2 : 13 + k * 8 - flap * 3;
+        // Width goes into the pinion, not into the span: a broad wing carried any
+        // further out clips the side walls of the cell, and out to the side is
+        // where this projection has the least room to give.
+        const out = broad ? 1.5 + k * 2 : 1 + k * 3;
+        const to = [from[0] - (3 + k * 5) * S, from[1] + side * out * S, from[2] - drop * S];
+        add('capsule', [from, to, (broad ? 3.8 : 2.8) * S, (broad ? 1.9 : 1.0) * S], rm, dep(from, to) - 1.5);
       }
     }
   }
@@ -459,6 +468,24 @@ function segments(spec, j, R, anim, t, a) {
     const tip = [base[0] + 6.5 * S, j.head[1], base[2] - 3 * S];
     add('capsule', [base, tip, 2.6 * S, 0.6 * S], R.horn || R.bone || R.skin, dep(j.head) + 0.6);
   }
+  // A tail dragged out behind the pelvis in two tapering sections, swaying out
+  // of phase with the stride. The sway stays small and every joint keeps its own
+  // radius above the floor: sideways in this projection is also downwards, and
+  // the sprite has only ten pixels below the foot line to spend.
+  if (P.tail) {
+    const rm = R.scales || R.cloth2 || R.cloth;
+    const sway = anim === 'death' ? 0 : Math.sin(t * TAU) * 1.6 * S;
+    const r0 = b.torsoR * S * 0.5;
+    // Held clear of the floor rather than dropped to it: behind the body is also
+    // below the foot line at half the facings, and there are only ten pixels
+    // there. Short sections for the same reason.
+    const p0 = [j.pelvis[0] - 1 * S, j.pelvis[1], Math.max(r0 * 1.2, j.pelvis[2] * 0.75)];
+    const p1 = [p0[0] - 6.5 * S, p0[1] + sway, Math.max(r0 * 1.3, p0[2] * 0.7)];
+    const p2 = [p1[0] - 6.5 * S, p1[1] + sway * 1.5, Math.max(r0 * 1.2, p1[2] * 0.9)];
+    add('capsule', [p0, p1, r0, r0 * 0.62], rm, dep(p0, p1) - 0.7);
+    add('capsule', [p1, p2, r0 * 0.62, 0.8 * S], rm, dep(p1, p2) - 0.8);
+  }
+
   if (P.spikes) {
     for (let i = 0; i < 4; i++) {
       const s = i < 2 ? -1 : 1;
@@ -1298,6 +1325,334 @@ export const FIGURE_SPECS = {
       hipU: 28, chestU: 40, neckU: 42, headU: 46, headR: 6.6,
       torsoR: 8.4, shoulder: 14, armR: 3.6, foreR: 3.0,
       upperArm: 11.5, foreArm: 11, hunch: 0.24,
+    },
+  }),
+
+  // ---------------------------------------------------------------- act four
+  //
+  // Hell's roster. Everything here is charcoal with a burn in it: black plate,
+  // scorched hide, ember eyes. Fire belongs to the light pass and to the lava
+  // vents, so no creature in this act carries a bright surface either -- what
+  // the eye reads as heat is a dull red over near-black, not orange.
+
+  // Doom knight: hell's line infantry. Full plate, helm down, cloak, blade out,
+  // and no bare skin anywhere -- the armour is the silhouette, so the shoulders
+  // are wide and the head sits low between them.
+  doomknight: humanoid({
+    palette: {
+      skin: '#4a4046', cloth: '#2e2b30', cloth2: '#232126', trim: '#6a4a3a',
+      hair: '#1c1a1e', metal: COLORS.darkSteel, wood: COLORS.wood,
+      cape: '#3a2024', bone: COLORS.boneShadow, boot: '#241f22',
+    },
+    scale: 1.04,
+    parts: { hood: true, cape: true, belt: true },
+    weapon: 'sword',
+    eyeColor: '#ff4a2a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD, shoulder: 14, torsoR: 7.4, armR: 3.2, foreR: 2.6,
+      headR: 5.2, hunch: 0.04, stance: 1.08,
+    },
+  }),
+
+  // Oblivion knight: the same plate with a mantle over it and a scythe instead
+  // of a blade, which is the whole difference between the knight who charges and
+  // the one who curses you first. Stooped a few units against the doom knight,
+  // because a shaft weapon is measured off the head and a full-height caster
+  // pushes the blade through the roof of the cell.
+  oblivionknight: humanoid({
+    palette: {
+      skin: '#3e3a42', cloth: '#26242c', cloth2: '#1c1a20', trim: '#7a6a4a',
+      hair: '#16151a', metal: '#5a5560', wood: COLORS.wood,
+      cape: '#2a2434', bone: COLORS.boneWhite, boot: '#1f1d22',
+    },
+    scale: 1.0,
+    parts: { hood: true, cape: true, robe: true, belt: true },
+    weapon: 'scythe',
+    eyeColor: '#9a6aff', eyeGlow: true,
+    build: {
+      ...DEFAULT_BUILD, shoulder: 14, torsoR: 7.4, armR: 3.2, foreR: 2.6,
+      headR: 5.2, hunch: 0.14, stance: 1.08,
+      hipU: 31, chestU: 45, neckU: 47, headU: 52,
+    },
+  }),
+
+  // Balrog: a winged demon that fights with its hands. Wings folded behind the
+  // shoulders on the wings recipe's own terms, horns, and a tail out behind, all
+  // over hide the colour of a cooled coal.
+  balrog: humanoid({
+    palette: {
+      skin: '#5a3028', cloth: '#3e241e', cloth2: '#2a1a16', wing: '#241a18',
+      scales: '#3a221c', hair: '#201512', horn: '#8a7a5a', bone: COLORS.boneShadow,
+      metal: COLORS.darkSteel, wood: COLORS.wood, trim: '#6a3a24',
+    },
+    // Big, on Andariel's terms: the build is stooped by five units so the horns
+    // clear the cell roof at a scale over one.
+    scale: 1.1,
+    parts: { wings: 'broad', horns: true, tail: true, bareArms: true, bareLegs: true, fangs: true },
+    weapon: 'none',
+    eyeColor: '#ff7a2a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD,
+      hipU: 31, chestU: 44, neckU: 46, headU: 51, headR: 5.8,
+      torsoR: 8.0, shoulder: 14, armR: 3.6, foreR: 3.0,
+      upperArm: 11.5, foreArm: 10.5, thighR: 4.2, shinR: 3.2,
+      hipSide: 5.6, hunch: 0.18, stance: 1.14,
+    },
+  }),
+
+  // Urdar: a mauler. Shorter than the knights and half again as wide, all of it
+  // in the shoulders and the club -- the Smith's proportions with horns on.
+  urdar: humanoid({
+    palette: {
+      skin: '#5e5148', cloth: '#3a3028', cloth2: '#2a231d', trim: '#6a5232',
+      hair: '#241c16', horn: '#9a8a68', bone: COLORS.boneShadow,
+      metal: COLORS.darkSteel, wood: '#4a3524', boot: COLORS.leather,
+    },
+    scale: 1.06,
+    parts: { horns: true, bareArms: true, belt: true, fangs: true },
+    weapon: 'club',
+    eyeColor: '#ffb03a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD,
+      shoulder: 15.5, torsoR: 8.8, armR: 4.0, foreR: 3.3,
+      upperArm: 11.5, foreArm: 10.5, thigh: 15, shin: 14,
+      hipU: 30, chestU: 43, neckU: 45, headU: 49, headR: 5.4,
+      thighR: 4.8, shinR: 3.7, hipSide: 6.0, hunch: 0.2, stance: 1.18,
+    },
+  }),
+
+  // Diablo. The heaviest thing in the game: horns, a spined back, a tail, and a
+  // stoop that puts the shoulders forward of the hips. Built low on purpose --
+  // mass at boss scale has to go sideways, because upward is where the cell ends.
+  diablo: humanoid({
+    palette: {
+      skin: '#6a2820', cloth: '#4e1e17', cloth2: '#361511', carapace: '#7a3423',
+      quill: '#843e28', scales: '#421913', hair: '#33120f', horn: '#c8b894',
+      bone: COLORS.boneWhite, metal: COLORS.darkSteel, wood: COLORS.wood,
+      trim: '#a85a26',
+    },
+    scale: 1.14,
+    parts: {
+      horns: true, spikes: true, quills: true, tail: true,
+      bareArms: true, bareLegs: true, fangs: true,
+    },
+    weapon: 'none',
+    eyeColor: '#ffd24a', eyeGlow: true,
+    build: {
+      ...DEFAULT_BUILD,
+      hipU: 29, chestU: 42, neckU: 44, headU: 48, headR: 6.0,
+      torsoR: 9.0, shoulder: 15, armR: 4.0, foreR: 3.3,
+      upperArm: 12, foreArm: 11, thigh: 15, shin: 14,
+      thighR: 4.8, shinR: 3.7, hipSide: 6.2, hunch: 0.24, stance: 1.2,
+    },
+  }),
+
+  // ---------------------------------------------------------------- act five
+  //
+  // The mountain. Frostbite grey and pale fur, with the demons that followed
+  // Baal up it keeping act four's charcoal. Snow is bright enough on its own
+  // that anything standing on it can afford to be darker than instinct says.
+
+  // Enslaved: the Fallen's frame after a winter on Arreat. Frostbitten skin,
+  // rags, the same club -- Baal's army is press-ganged, not bred.
+  enslaved: humanoid({
+    palette: {
+      skin: '#5e6068', cloth: '#3e3a3a', cloth2: COLORS.leather, hair: '#2a2828',
+      bone: COLORS.boneShadow, horn: '#8a8478', wood: COLORS.wood,
+      metal: COLORS.darkSteel, trim: COLORS.leather,
+    },
+    scale: 0.84,
+    parts: { horns: true, bareArms: true, bareLegs: true, fangs: true },
+    weapon: 'club',
+    eyeColor: '#9adcff', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: IMP_BUILD,
+  }),
+
+  // Death minion: Shenk's siege infantry. Bulky, spined down both flanks, and
+  // it fights with its hands, so the arms are heavy and there is no weapon to
+  // read around them.
+  deathminion: humanoid({
+    palette: {
+      skin: '#4a4a52', cloth: '#33333a', cloth2: '#25252b', carapace: '#5e5e68',
+      quill: '#6a6a74', hair: '#1e1e24', horn: '#8a8a94', bone: COLORS.boneShadow,
+      metal: COLORS.darkSteel, wood: COLORS.wood, trim: '#5a4a3a',
+    },
+    scale: 1.04,
+    parts: { spikes: true, quills: true, horns: true, bareArms: true, belt: true, fangs: true },
+    weapon: 'none',
+    eyeColor: '#ff5a3a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD,
+      shoulder: 15, torsoR: 8.4, armR: 3.9, foreR: 3.2,
+      upperArm: 12, foreArm: 11, thigh: 15, shin: 14,
+      hipU: 30, chestU: 43, neckU: 45, headU: 49, headR: 5.4,
+      thighR: 4.6, shinR: 3.6, hipSide: 5.8, hunch: 0.28, stance: 1.16,
+    },
+  }),
+
+  // Succubus: a winged caster. Slight where the rest of the act is bulky, which
+  // is the point -- she is the one thing on the mountain that reads as fast. No
+  // weapon: the hands are for casting, so the cast animation carries her.
+  succubus: humanoid({
+    palette: {
+      skin: '#7a5a5e', cloth: '#3a2434', cloth2: '#2a1a26', wing: '#2b1f2c',
+      scales: '#33222e', hair: '#2a1a1e', horn: '#8a7a68', bone: COLORS.boneShadow,
+      metal: COLORS.darkSteel, wood: COLORS.wood, gem: COLORS.blood, trim: '#8a4a5a',
+    },
+    scale: 0.98,
+    parts: { wings: 'broad', horns: true, tail: true, hair: true, robe: true, bareArms: true },
+    weapon: 'none',
+    eyeColor: '#ff5a7a', eyeGlow: true,
+    build: { ...DEFAULT_BUILD, torsoR: 5.4, shoulder: 10.5, headR: 5.2, hunch: 0.08 },
+  }),
+
+  // Frozen horror: the mountain's own animal. Pale fur over a heavy frame, a fur
+  // ruff at the shoulders on the quill recipe, and a head sunk between them. The
+  // fur is grey rather than white -- white fur on snow has no silhouette at all.
+  frozenhorror: humanoid({
+    palette: {
+      skin: '#7a808a', cloth: '#66707c', cloth2: '#505a66', quill: '#8a939c',
+      carapace: '#7a848e', hair: '#505a66', horn: '#c8c4b0', bone: COLORS.boneWhite,
+      metal: COLORS.darkSteel, wood: COLORS.wood, trim: '#9aa4ae',
+    },
+    scale: 1.14,
+    parts: { quills: true, horns: true, bareArms: true, bareLegs: true, fangs: true },
+    weapon: 'none',
+    eyeColor: '#9adcff', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD,
+      shoulder: 15.5, torsoR: 9.0, armR: 4.2, foreR: 3.4,
+      upperArm: 12.5, foreArm: 11.5, thigh: 14, shin: 13,
+      hipU: 28, chestU: 41, neckU: 43, headU: 47, headR: 6.0,
+      thighR: 5.0, shinR: 3.8, hipSide: 6.2, hunch: 0.3, stance: 1.2,
+    },
+  }),
+
+  // Moon lord: the balrog recipe gone pale. Same wings, same tail, ash-grey hide
+  // and a cold light in the eyes instead of an ember -- the ones that came down
+  // off the mountain rather than up out of the fire.
+  moonlord: humanoid({
+    palette: {
+      skin: '#5e5a56', cloth: '#403c38', cloth2: '#2c2926', wing: '#2a2724',
+      scales: '#3a3632', hair: '#242220', horn: '#c8c0aa', bone: COLORS.boneWhite,
+      metal: COLORS.darkSteel, wood: COLORS.wood, trim: '#8a8270',
+    },
+    scale: 1.08,
+    parts: { wings: 'broad', horns: true, tail: true, bareArms: true, bareLegs: true, fangs: true },
+    weapon: 'none',
+    eyeColor: '#e8e0a0', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD,
+      hipU: 31, chestU: 44, neckU: 46, headU: 51, headR: 5.8,
+      torsoR: 8.0, shoulder: 14, armR: 3.6, foreR: 3.0,
+      upperArm: 11.5, foreArm: 10.5, thighR: 4.2, shinR: 3.2,
+      hipSide: 5.6, hunch: 0.18, stance: 1.14,
+    },
+  }),
+
+  // Izual. The balrog's frame at boss scale in the cold blue of a thing that was
+  // an angel once: pale hide, frost-white horns, ice in the eyes. Nothing about
+  // the pose changes -- what he was is carried entirely by the palette.
+  izual: humanoid({
+    palette: {
+      skin: '#54606e', cloth: '#3c4652', cloth2: '#2a323c', wing: '#28303a',
+      scales: '#38424e', hair: '#232a34', horn: '#d0dce8', bone: COLORS.boneWhite,
+      metal: '#7a8694', wood: COLORS.wood, trim: '#8aa0b8', gem: COLORS.ice,
+    },
+    // Held at the balrog's scale rather than above it, and heavier in the build
+    // instead: he is the biggest winged thing in the game, and a wing tip is
+    // already the closest part of any figure here to the side of the cell.
+    scale: 1.10,
+    parts: { wings: 'broad', horns: true, tail: true, bareArms: true, bareLegs: true, fangs: true },
+    weapon: 'none',
+    eyeColor: '#9adcff', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD,
+      hipU: 30, chestU: 43, neckU: 45, headU: 49, headR: 5.8,
+      torsoR: 8.2, shoulder: 14.5, armR: 3.8, foreR: 3.1,
+      upperArm: 11.5, foreArm: 10.5, thighR: 4.3, shinR: 3.3,
+      hipSide: 5.8, hunch: 0.2, stance: 1.14,
+    },
+  }),
+
+  // Hephasto the Armourer: the urdar's build with a smith's maul in both hands.
+  // Soot-black hide, and the only bright thing on him is the head of the hammer,
+  // which is the same trick the Smith in the barracks is built on.
+  hephasto: humanoid({
+    palette: {
+      skin: '#4e4238', cloth: '#33291f', cloth2: '#241d16', trim: '#8a6a3a',
+      hair: '#1c1610', horn: '#a89468', bone: COLORS.boneShadow,
+      metal: COLORS.steel, wood: COLORS.leather, gem: COLORS.ember, boot: COLORS.leather,
+    },
+    scale: 1.1,
+    parts: { horns: true, bareArms: true, belt: true, fangs: true },
+    weapon: 'hammer',
+    attackStyle: 'twoHand',
+    eyeColor: '#ff8a2a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD,
+      shoulder: 15.5, torsoR: 8.8, armR: 4.0, foreR: 3.3,
+      upperArm: 11.5, foreArm: 10.5, thigh: 15, shin: 14,
+      hipU: 30, chestU: 43, neckU: 45, headU: 49, headR: 5.4,
+      thighR: 4.8, shinR: 3.7, hipSide: 6.0, hunch: 0.2, stance: 1.18,
+    },
+  }),
+
+  // The Ancient: the barbarian's own frame cast in statue bronze. Same build,
+  // same two-handed axe, same stance -- a guardian of Arreat is what the player
+  // is, held still for three hundred years, and the palette is the only thing
+  // that says so. Verdigris in the recesses keeps the bronze from reading gold.
+  ancient: humanoid({
+    palette: {
+      skin: '#8a6a3a', cloth: '#6a4e28', cloth2: '#4a3a24', trim: '#3f5a4a',
+      hair: '#5a4222', metal: '#9a7a42', wood: '#6a5230',
+      bone: '#a88a54', boot: '#4a3a24',
+    },
+    scale: 1.06,
+    parts: { hair: true, bareArms: true, belt: true },
+    weapon: 'greataxe',
+    attackStyle: 'twoHand',
+    eyeColor: '#d8c078', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD,
+      shoulder: 14.5, torsoR: 7.8, armR: 3.7, foreR: 3.0,
+      upperArm: 11.5, foreArm: 10.5,
+      chestU: 45, neckU: 48, headU: 52, headR: 5.5,
+      thighR: 4.4, shinR: 3.4, hipSide: 5.6,
+      hunch: -0.06, stance: 1.12,
+    },
+  }),
+
+  // Baal. Robed and horned rather than winged, and he casts: the Lord of
+  // Destruction fights the way Mephisto does, from where he stands. Built heavy
+  // under the robe so the hem has mass to hang from, and stooped, because the
+  // arms go up on the cast and the cell roof does not move.
+  baal: humanoid({
+    palette: {
+      skin: '#6a5a4a', cloth: '#2e2822', cloth2: '#221d19', carapace: '#4a3e30',
+      quill: '#5a4c3a', hair: '#1e1a16', horn: '#c8b890', bone: COLORS.boneWhite,
+      metal: COLORS.darkSteel, wood: COLORS.wood, gem: COLORS.ember, trim: '#8a6a3a',
+    },
+    scale: 1.1,
+    parts: { robe: true, horns: true, spikes: true, quills: true, bareArms: true, belt: true, fangs: true },
+    weapon: 'none',
+    eyeColor: '#ffb03a', eyeGlow: true,
+    build: {
+      ...DEFAULT_BUILD,
+      hipU: 29, chestU: 42, neckU: 44, headU: 48, headR: 6.2,
+      torsoR: 8.6, shoulder: 14.5, armR: 3.8, foreR: 3.1,
+      upperArm: 11.5, foreArm: 11, thigh: 15, shin: 14,
+      thighR: 4.6, shinR: 3.6, hipSide: 5.8, hunch: 0.22, stance: 1.16,
     },
   }),
 };
