@@ -672,8 +672,13 @@ function step(dt) {
   const overHud = my > canvas.height - HUD_H * uiScale;
   const overPanel = ui.pointerOverPanel(mx, my, gctx);
 
-  // The wheel's only job is the shop list; drawVendor clamps the value.
-  if (ui.open === 'vendor' && Input.mouse.wheel) ui.vendorScroll += Input.mouse.wheel;
+  // The wheel's only job is a list that outran its panel: the shop's stock, or
+  // the skill picker's rows once thirty skills are unlocked. Both clamp while
+  // drawing, so an over-scroll here is harmless.
+  if (Input.mouse.wheel) {
+    if (ui.open === 'vendor') ui.vendorScroll += Input.mouse.wheel;
+    else if (ui.open === 'skillpicker') ui.pickerScroll += Input.mouse.wheel;
+  }
 
   if (Input.consumeL()) {
     if (ui.mouseDown(mx, my, player, gctx, 0)) {

@@ -40,6 +40,58 @@ const STAT_ROWS = [
   ['str', 'Strength'], ['dex', 'Dexterity'], ['vit', 'Vitality'], ['ene', 'Energy'],
 ];
 
+// The skill tree's geometry, in logical pixels before the UI scale. Six req
+// tiers run down each tree column, and a tier holds one, two, or -- where the
+// spec puts sword, axe and mace all at level one -- three icons abreast.
+const TREE = {
+  icon: 38,    // the box one skill icon occupies
+  step: 52,    // centre to centre of two icons sharing a tier
+  tier: 62,    // top of one tier row to the top of the next
+  colPad: 14,  // column edge to the outermost icon standing in it
+  edge: 12,    // panel border to the first column
+  head: 78,    // panel top down to the first tier row
+  foot: 34,    // bottom of the last tier row down to the panel bottom
+  top: 54,     // canvas top down to the panel top
+};
+
+// Measured from the skill data rather than written out: the deepest tree says
+// how many tier rows the panel needs, the widest tier row says how wide a
+// column must be cut, and the class with the most trees says how many columns.
+// Today that is six rows, three abreast, three columns. Cutting the column for
+// the widest row the game holds is what keeps the odd three-abreast tier inside
+// the border -- every narrower tier simply sits with more air around it.
+const TREE_SHAPE = (() => {
+  const perTree = {};
+  for (const sk of SKILLS) {
+    const tiers = (perTree[sk.tree] = perTree[sk.tree] || {});
+    tiers[sk.req] = (tiers[sk.req] || 0) + 1;
+  }
+  let tiers = 1, abreast = 1;
+  for (const t of Object.values(perTree)) {
+    tiers = Math.max(tiers, Object.keys(t).length);
+    for (const n of Object.values(t)) abreast = Math.max(abreast, n);
+  }
+  const cols = Math.max(...Object.values(CLASS_TREES).map((list) => list.length));
+  return { tiers, abreast, cols };
+})();
+
+const TREE_COL_W = (TREE_SHAPE.abreast - 1) * TREE.step + TREE.icon + TREE.colPad * 2;
+const TREE_W = TREE_SHAPE.cols * TREE_COL_W + TREE.edge * 2;
+const TREE_H = TREE.head + (TREE_SHAPE.tiers - 1) * TREE.tier + TREE.icon + TREE.foot;
+
+// The skill picker, same units. Thirty skills only read as thirty when they are
+// grouped, so each tree gets its own rows with its name in the left gutter;
+// rows are one height throughout, which is what lets the list scroll in whole
+// rows the way the shop list does.
+const PICK = {
+  cols: 6,      // icons to a row
+  cell: 46,     // one icon tile
+  pad: 8,
+  gutter: 76,   // the tree-name column down the left
+  head: 40,     // the title strip
+  rail: 8,      // right margin the scroll track lives in
+};
+
 export class UI {
   constructor() {
     this.open = null;          // 'inventory' | 'character' | 'skills' | 'vendor' | null
@@ -49,6 +101,7 @@ export class UI {
     this.tooltip = null;
     this.vendorStock = null;
     this.vendorScroll = 0;     // whole rows scrolled off the top of the shop list
+    this.pickerScroll = 0;     // and the same for the skill picker's rows
     this.pickerSide = 'right'; // which mouse button the skill picker is binding
     this.npc = null;           // whoever is being spoken to
     this.npcSaid = null;       // the line currently on screen
@@ -72,6 +125,7 @@ export class UI {
 
   // The two skill buttons on the bar open this, one per mouse button.
   openPicker(side) {
+    this.pickerScroll = 0;
     if (this.open === 'skillpicker' && this.pickerSide === side) { this.open = null; return; }
     this.pickerSide = side;
     this.open = 'skillpicker';
@@ -91,8 +145,22 @@ export class UI {
       s, cell: CELL * s,
       right: { x, y, w, h },
       leftPanel: { x: left, y, w, h },
-      wide: { x: canvasW / 2 - (w * 1.15) / 2, y, w: w * 1.15, h: h * 1.05 },
+      wide: this.treeRect(canvasW, canvasH, s),
     };
+  }
+
+  // The skill panel is measured from the icons it has to hold rather than from a
+  // round number, so no icon can hang over its border. On a window too small for
+  // that natural size the whole panel shrinks by one factor -- `u` below, the
+  // scale everything in the tree is drawn at -- which keeps all thirty icons on
+  // screen and clickable. Scrolling the tree would hide half of it instead.
+  treeRect(canvasW, canvasH, s) {
+    const fit = Math.min(1,
+      canvasW / ((TREE_W + TREE.edge * 4) * s),
+      (canvasH - HUD_H * s) / ((TREE.top + TREE_H + 10) * s));
+    const u = s * fit;
+    const w = TREE_W * u, h = TREE_H * u;
+    return { x: canvasW / 2 - w / 2, y: TREE.top * u, w, h, u };
   }
 
   // ------------------------------------------------------------------- draw
@@ -314,17 +382,18 @@ export class UI {
   // ------------------------------------------------------------- skill tree
 
   drawSkills(ctx, player, L, mx, my) {
-    const { x, y, w, h } = L.wide;
-    const s = L.s;
+    const { x, y, w, h, u } = L.wide;
     panel(ctx, x, y, w, h);
-    panelTitle(ctx, 'Skills', x, y, w, s);
+    panelTitle(ctx, 'Skills', x, y, w, u);
 
     const trees = CLASS_TREES[player.cls];
-    const colW = w / trees.length;
-    const iconSz = 38 * s;
+    const colW = (w - TREE.edge * 2 * u) / trees.length;
+    const iconSz = TREE.icon * u;
     const positions = {};
 
-    // Rows are ordered by the level a skill unlocks at.
+    // One row per req tier, in unlock order: level 1 at the top, level 30 at the
+    // foot. A tier with nothing in it would simply not exist -- the rows are the
+    // tiers the tree actually uses, not a fixed ladder.
     const rowsFor = (tree) => {
       const list = SKILLS.filter((sk) => sk.tree === tree);
       const byReq = {};
@@ -333,26 +402,29 @@ export class UI {
     };
 
     trees.forEach((tree, ti) => {
-      const cx = x + colW * ti + colW / 2;
+      const cx = x + TREE.edge * u + colW * (ti + 0.5);
       ctx.fillStyle = '#c8b070';
-      ctx.font = `${Math.round(14 * s)}px Georgia, serif`;
+      ctx.font = `${Math.round(14 * u)}px Georgia, serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(TREE_NAME[tree], cx, y + 56 * s);
+      ctx.fillText(TREE_NAME[tree], cx, y + 56 * u);
       ctx.textAlign = 'left';
 
       const rows = rowsFor(tree);
       rows.forEach((row, ri) => {
-        const ry = y + 78 * s + ri * 62 * s;
+        const ry = y + TREE.head * u + ri * TREE.tier * u;
         row.forEach((sk, si) => {
-          const spread = (si - (row.length - 1) / 2) * 62 * s;
+          // A tier's icons straddle the centre of the column: one skill sits
+          // under the tree's name, two split either side of it, three go abreast.
+          const spread = (si - (row.length - 1) / 2) * TREE.step * u;
           positions[sk.id] = { x: cx + spread - iconSz / 2, y: ry, w: iconSz, h: iconSz };
         });
       });
     });
 
-    // Prerequisite lines, drawn under the icons.
+    // Prerequisite lines, drawn under the icons. Every prerequisite lives in the
+    // same tree as the skill needing it, so each line stays inside its column.
     ctx.strokeStyle = 'rgba(150,130,80,0.45)';
-    ctx.lineWidth = 2 * s;
+    ctx.lineWidth = 2 * u;
     for (const sk of SKILLS) {
       for (const p of sk.prereq || []) {
         const a = positions[p], b = positions[sk.id];
@@ -376,30 +448,30 @@ export class UI {
       const ic = skillIcon(sk.id);
       ctx.save();
       ctx.globalAlpha = pts > 0 ? 1 : 0.4;
-      ctx.drawImage(ic, r.x + (r.w - ic.width * s) / 2, r.y + (r.h - ic.height * s) / 2, ic.width * s, ic.height * s);
+      ctx.drawImage(ic, r.x + (r.w - ic.width * u) / 2, r.y + (r.h - ic.height * u) / 2, ic.width * u, ic.height * u);
       ctx.restore();
 
       ctx.strokeStyle = hovered ? '#ffe08a' : can.ok ? '#8fd88f' : pts > 0 ? '#9a8f70' : 'rgba(120,100,60,0.5)';
-      ctx.lineWidth = 2 * s;
+      ctx.lineWidth = 2 * u;
       ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
 
       if (pts > 0) {
         const lvl = skillLevel(player, sk.id);
         ctx.fillStyle = lvl > pts ? '#7a86ff' : '#ffe08a';
-        ctx.font = `${Math.round(12 * s)}px Georgia, serif`;
+        ctx.font = `${Math.round(12 * u)}px Georgia, serif`;
         ctx.textAlign = 'right';
-        ctx.fillText(String(lvl), r.x + r.w - 3 * s, r.y + r.h - 3 * s);
+        ctx.fillText(String(lvl), r.x + r.w - 3 * u, r.y + r.h - 3 * u);
         ctx.textAlign = 'left';
       }
       if (player.rightSkill === sk.id) {
         ctx.strokeStyle = '#ff9a30';
-        ctx.lineWidth = 2 * s;
-        ctx.strokeRect(r.x - 3 * s, r.y - 3 * s, r.w + 6 * s, r.h + 6 * s);
+        ctx.lineWidth = 2 * u;
+        ctx.strokeRect(r.x - 3 * u, r.y - 3 * u, r.w + 6 * u, r.h + 6 * u);
       }
       if (player.leftSkill === sk.id) {
         ctx.strokeStyle = '#7ad0ff';
-        ctx.lineWidth = 2 * s;
-        ctx.strokeRect(r.x - 5 * s, r.y - 5 * s, r.w + 10 * s, r.h + 10 * s);
+        ctx.lineWidth = 2 * u;
+        ctx.strokeRect(r.x - 5 * u, r.y - 5 * u, r.w + 10 * u, r.h + 10 * u);
       }
 
       if (hovered && !this.drag) {
@@ -413,10 +485,10 @@ export class UI {
     }
 
     ctx.fillStyle = player.skillPoints > 0 ? '#ffe08a' : '#8a7f6a';
-    ctx.font = `${Math.round(14 * s)}px Georgia, serif`;
+    ctx.font = `${Math.round(14 * u)}px Georgia, serif`;
     ctx.textAlign = 'center';
     ctx.fillText(`${player.skillPoints} skill point${player.skillPoints === 1 ? '' : 's'} to spend`,
-      x + w / 2, y + h - 16 * s);
+      x + w / 2, y + h - 16 * u);
     ctx.textAlign = 'left';
   }
 
@@ -667,65 +739,105 @@ export class UI {
 
   // ----------------------------------------------------------- skill picker
 
-  // What either mouse button may be bound to: the plain attack, plus every
-  // non-passive skill with a point in it.
-  bindable(player) {
-    return ['attack', ...SKILLS.filter((sk) => !sk.passive && allocatedPoints(player, sk.id) > 0).map((sk) => sk.id)];
+  // What either mouse button may be bound to, laid out in rows: the plain attack
+  // first, then each of the class's trees in turn, six icons to a row, with the
+  // tree's name in the gutter beside the first row it takes. Only non-passive
+  // skills with a point in them can be bound, so the list grows as points go in.
+  pickerRows(player) {
+    const rows = [{ label: 'Basic', ids: ['attack'] }];
+    for (const tree of CLASS_TREES[player.cls]) {
+      const ids = SKILLS
+        .filter((sk) => sk.tree === tree && !sk.passive && allocatedPoints(player, sk.id) > 0)
+        .map((sk) => sk.id);
+      for (let i = 0; i < ids.length; i += PICK.cols) {
+        rows.push({ tree, label: i === 0 ? TREE_NAME[tree] : '', ids: ids.slice(i, i + PICK.cols) });
+      }
+    }
+    return rows;
   }
 
+  // The picker stands on the belt and grows upward, but never past the top of
+  // the screen: rows that will not fit are scrolled to instead, in whole rows,
+  // exactly as the shop list does. `visible` is that whole-row count.
   pickerRect(canvasW, canvasH, s, player) {
-    const n = this.bindable(player).length;
-    const cols = Math.min(6, n);
-    const rows = Math.ceil(n / cols);
-    const cell = 46 * s, pad = 8 * s;
-    const w = cols * (cell + pad) + pad;
-    const h = rows * (cell + pad) + pad + 46 * s;
-    return {
-      x: canvasW / 2 - w / 2, y: canvasH - HUD_H * s - h - 10 * s, w, h, cols, cell, pad,
-    };
+    const rows = this.pickerRows(player).length;
+    const rowH = (PICK.cell + PICK.pad) * s;
+    const chrome = (PICK.head + PICK.pad) * s;
+    const room = canvasH - HUD_H * s - 20 * s - chrome;
+    const visible = Math.max(1, Math.min(rows, Math.floor(room / rowH)));
+    const w = (PICK.gutter + PICK.cols * (PICK.cell + PICK.pad) + PICK.pad + PICK.rail) * s;
+    const h = chrome + visible * rowH;
+    return { x: canvasW / 2 - w / 2, y: canvasH - HUD_H * s - h - 10 * s, w, h, rowH, visible, rows };
   }
 
   drawSkillPicker(ctx, player, L, mx, my) {
     const s = L.s;
-    const list = this.bindable(player);
+    const rows = this.pickerRows(player);
     const R = this.pickerRect(ctx.canvas.width, ctx.canvas.height, s, player);
     panel(ctx, R.x, R.y, R.w, R.h);
     panelTitle(ctx, this.pickerSide === 'left' ? 'Left Mouse Skill' : 'Right Mouse Skill', R.x, R.y, R.w, s);
 
-    const bound = this.pickerSide === 'left' ? player.leftSkill : player.rightSkill;
-    list.forEach((id, i) => {
-      const col = i % R.cols, row = (i / R.cols) | 0;
-      const rect = {
-        x: R.x + R.pad + col * (R.cell + R.pad),
-        y: R.y + 40 * s + R.pad + row * (R.cell + R.pad),
-        w: R.cell, h: R.cell,
-      };
-      const hovered = this.hovering(rect, mx, my);
-      ctx.fillStyle = hovered ? 'rgba(90,78,44,0.6)' : 'rgba(0,0,0,0.55)';
-      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-      if (id === 'attack') {
-        ctx.fillStyle = '#c8b070';
-        ctx.font = `${Math.round(11 * s)}px Georgia, serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText('Attack', rect.x + rect.w / 2, rect.y + rect.h / 2 + 4 * s);
-        ctx.textAlign = 'left';
-      } else {
-        const ic = skillIcon(id);
-        ctx.drawImage(ic, rect.x + (rect.w - ic.width * s) / 2, rect.y + (rect.h - ic.height * s) / 2,
-          ic.width * s, ic.height * s);
-      }
-      ctx.strokeStyle = id === bound ? '#ffb020' : hovered ? '#ffe08a' : 'rgba(140,120,70,0.55)';
-      ctx.lineWidth = 2 * s;
-      ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+    const maxScroll = Math.max(0, R.rows - R.visible);
+    this.pickerScroll = Math.max(0, Math.min(this.pickerScroll, maxScroll));
+    const listTop = R.y + PICK.head * s;
 
-      if (hovered && !this.drag) {
-        this.tooltip = id === 'attack'
-          ? [{ text: 'Attack', colour: '#ffe08a', header: true },
-             { text: 'Swing whatever is in your hand.', colour: '#a89f88', wrap: true }]
-          : describeSkill(player, id);
+    const bound = this.pickerSide === 'left' ? player.leftSkill : player.rightSkill;
+    for (let i = 0; i < R.visible; i++) {
+      const row = rows[i + this.pickerScroll];
+      if (!row) break;
+      const ry = listTop + i * R.rowH;
+      // A tree's name sits beside its first row. When scrolling has carried that
+      // row off the top, the row now at the top says the name again, dimmed, so
+      // the icons on screen always belong to something you can read.
+      const label = row.label || (i === 0 && row.tree ? TREE_NAME[row.tree] : '');
+      if (label) {
+        ctx.fillStyle = row.label ? '#c8b070' : '#8a7f6a';
+        ctx.font = `${Math.round(12 * s)}px Georgia, serif`;
+        ctx.fillText(label, R.x + PICK.pad * s, ry + (PICK.cell / 2 + 4) * s);
       }
-      this.area(rect, 'bind', id);
-    });
+      row.ids.forEach((id, c) => {
+        const rect = {
+          x: R.x + (PICK.gutter + PICK.pad) * s + c * (PICK.cell + PICK.pad) * s,
+          y: ry, w: PICK.cell * s, h: PICK.cell * s,
+        };
+        const hovered = this.hovering(rect, mx, my);
+        ctx.fillStyle = hovered ? 'rgba(90,78,44,0.6)' : 'rgba(0,0,0,0.55)';
+        ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+        if (id === 'attack') {
+          ctx.fillStyle = '#c8b070';
+          ctx.font = `${Math.round(11 * s)}px Georgia, serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText('Attack', rect.x + rect.w / 2, rect.y + rect.h / 2 + 4 * s);
+          ctx.textAlign = 'left';
+        } else {
+          const ic = skillIcon(id);
+          ctx.drawImage(ic, rect.x + (rect.w - ic.width * s) / 2, rect.y + (rect.h - ic.height * s) / 2,
+            ic.width * s, ic.height * s);
+        }
+        ctx.strokeStyle = id === bound ? '#ffb020' : hovered ? '#ffe08a' : 'rgba(140,120,70,0.55)';
+        ctx.lineWidth = 2 * s;
+        ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+
+        if (hovered && !this.drag) {
+          this.tooltip = id === 'attack'
+            ? [{ text: 'Attack', colour: '#ffe08a', header: true },
+               { text: 'Swing whatever is in your hand.', colour: '#a89f88', wrap: true }]
+            : describeSkill(player, id);
+        }
+        this.area(rect, 'bind', id);
+      });
+    }
+
+    if (maxScroll > 0) {
+      const trackX = R.x + R.w - 10 * s;
+      const trackH = R.visible * R.rowH;
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(trackX, listTop, 4 * s, trackH);
+      const thumbH = Math.max(18 * s, (R.visible / R.rows) * trackH);
+      const thumbY = listTop + (this.pickerScroll / maxScroll) * (trackH - thumbH);
+      ctx.fillStyle = 'rgba(160,140,80,0.8)';
+      ctx.fillRect(trackX, thumbY, 4 * s, thumbH);
+    }
   }
 
   // ------------------------------------------------------------------- input
