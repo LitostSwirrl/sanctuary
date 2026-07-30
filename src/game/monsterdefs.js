@@ -50,6 +50,101 @@ export const MONSTERS = {
     resists: { pois: 100, phys: 15, cold: 25 },
   },
 
+  // ------------------------------------------------------------- act 2 desert
+  // Written at level 1 like everything above; the desert meets them at area
+  // level 13 and up, so the scaling does the act's work.
+  sandraider: {
+    id: 'sandraider', name: 'Sand Raider', figure: 'sandraider',
+    hp: 30, dmg: [5, 10], ar: 48, def: 16, speed: 4.2, xp: 22,
+    radius: 0.30, ai: 'melee', wake: 12, attackRange: 1.05, attackCooldown: 0.95,
+    resists: { fire: 25 },
+  },
+  vulturedemon: {
+    id: 'vulturedemon', name: 'Vulture Demon', figure: 'vulturedemon',
+    hp: 25, dmg: [5, 11], ar: 52, def: 12, speed: 5.6, xp: 20,
+    radius: 0.30, ai: 'melee', wake: 15, attackRange: 1.0, attackCooldown: 0.9,
+    resists: {}, flees: true,
+  },
+  sandmaggot: {
+    // A burrower that spits from range and is nearly helpless up close, which
+    // is why it keeps its distance and why the poison lingers.
+    id: 'sandmaggot', name: 'Sand Maggot', figure: 'sandmaggot',
+    hp: 32, dmg: [4, 9], ar: 34, def: 10, speed: 2.2, xp: 19,
+    radius: 0.34, ai: 'ranged', wake: 12, attackRange: 8, attackCooldown: 2.2,
+    resists: { pois: 100 }, keepDistance: 5,
+    bolt: { element: 'pois', min: 4, max: 9, speed: 8, colour: '#8ac040' },
+  },
+  scarab: {
+    // Small, quick, and crackling: the spec's lightning-enchant flavour, so
+    // every hit carries a jolt without waiting for a unique pack's modifier.
+    id: 'scarab', name: 'Scarab', figure: 'scarab',
+    hp: 18, dmg: [3, 7], ar: 44, def: 14, speed: 4.8, xp: 17,
+    radius: 0.26, ai: 'melee', wake: 13, attackRange: 0.9, attackCooldown: 0.9,
+    resists: { light: 75 }, enchant: 'light',
+  },
+  mummy: {
+    id: 'mummy', name: 'Mummy', figure: 'mummy',
+    hp: 42, dmg: [5, 11], ar: 30, def: 12, speed: 1.8, xp: 21,
+    radius: 0.32, ai: 'melee', wake: 9, attackRange: 1.0, attackCooldown: 1.55,
+    resists: { pois: 100, cold: 50, phys: 10 },
+  },
+  greatermummy: {
+    // Radament's kind: a priest of the tombs that raises what you drop and
+    // throws unholy bolts from behind the line.
+    id: 'greatermummy', name: 'Greater Mummy', figure: 'greatermummy',
+    hp: 36, dmg: [4, 9], ar: 36, def: 14, speed: 2.4, xp: 30,
+    radius: 0.32, ai: 'caster', wake: 13, attackRange: 8, attackCooldown: 2.2,
+    resists: { pois: 100, cold: 50 }, special: 'resurrect', keepDistance: 5,
+    bolt: { element: 'pois', min: 5, max: 10, speed: 8, colour: '#a0d048' },
+  },
+  clawviper: {
+    id: 'clawviper', name: 'Claw Viper', figure: 'clawviper',
+    hp: 28, dmg: [6, 12], ar: 54, def: 18, speed: 5.8, xp: 26,
+    radius: 0.30, ai: 'melee', wake: 14, attackRange: 1.0, attackCooldown: 0.85,
+    resists: { cold: 50 },
+  },
+
+  // ------------------------------------------------------------- act 3 jungle
+  flayer: {
+    id: 'flayer', name: 'Flayer', figure: 'flayer',
+    hp: 24, dmg: [5, 10], ar: 52, def: 14, speed: 5.2, xp: 20,
+    radius: 0.26, ai: 'melee', wake: 13, attackRange: 0.9, attackCooldown: 0.85,
+    resists: {}, flees: true,
+  },
+  flayershaman: {
+    id: 'flayershaman', name: 'Flayer Shaman', figure: 'flayershaman',
+    hp: 28, dmg: [4, 9], ar: 38, def: 12, speed: 3.4, xp: 32,
+    radius: 0.26, ai: 'caster', wake: 14, attackRange: 7.5, attackCooldown: 2.0,
+    resists: { fire: 50 }, special: 'resurrect', keepDistance: 5,
+    bolt: { element: 'fire', min: 5, max: 10, speed: 9, colour: '#ff8a30' },
+  },
+  thornhulk: {
+    id: 'thornhulk', name: 'Thorn Hulk', figure: 'thornhulk',
+    hp: 60, dmg: [8, 16], ar: 44, def: 20, speed: 2.6, xp: 34,
+    radius: 0.40, ai: 'melee', wake: 11, attackRange: 1.3, attackCooldown: 1.5,
+    resists: { pois: 100, phys: 15, fire: -25 },
+  },
+  giantspider: {
+    // The bite is the poison: the enchant lays it on every landed hit.
+    id: 'giantspider', name: 'Giant Spider', figure: 'giantspider',
+    hp: 30, dmg: [5, 11], ar: 50, def: 16, speed: 5.0, xp: 25,
+    radius: 0.34, ai: 'melee', wake: 13, attackRange: 1.0, attackCooldown: 1.0,
+    resists: { pois: 100 }, enchant: 'pois',
+  },
+  zealot: {
+    id: 'zealot', name: 'Zealot', figure: 'zealot',
+    hp: 34, dmg: [6, 13], ar: 58, def: 22, speed: 4.4, xp: 28,
+    radius: 0.30, ai: 'melee', wake: 13, attackRange: 1.05, attackCooldown: 0.9,
+    resists: { light: 25 },
+  },
+  councilmember: {
+    id: 'councilmember', name: 'Council Member', figure: 'councilmember',
+    hp: 44, dmg: [6, 12], ar: 48, def: 20, speed: 3.2, xp: 44,
+    radius: 0.32, ai: 'caster', wake: 14, attackRange: 8, attackCooldown: 1.9,
+    resists: { fire: 75, light: 25 }, keepDistance: 5,
+    bolt: { element: 'fire', min: 7, max: 14, speed: 10, colour: '#ff7a30' },
+  },
+
   // ------------------------------------------------------------------ bosses
   corpsefire: {
     id: 'corpsefire', name: 'Corpsefire', figure: 'corpsefire',
@@ -77,6 +172,45 @@ export const MONSTERS = {
     resists: { fire: 60, phys: 20 }, boss: true, aura: '#ff8a3a',
     mods: ['Extra Strong', 'Stone Skin'],
   },
+  radament: {
+    // The Horadrim gone wrong in the dark under Lut Gholein. A caster boss on
+    // the shaman pattern: he keeps behind what he raises and throws rot.
+    id: 'radament', name: 'Radament', figure: 'greatermummy',
+    hp: 700, dmg: [8, 16], ar: 110, def: 40, speed: 2.6, xp: 1500,
+    radius: 0.36, ai: 'caster', wake: 16, attackRange: 9, attackCooldown: 1.8,
+    resists: { pois: 100, cold: 50, fire: 25 }, boss: true, aura: '#8ad04a',
+    special: 'resurrect', keepDistance: 5,
+    bolt: { element: 'pois', min: 10, max: 20, speed: 9, colour: '#a0d048' },
+  },
+  duriel: {
+    // The gate of act two. All melee and all pressure: fast for his bulk, cold
+    // on every blow, and nothing about him to kite except the doorway.
+    id: 'duriel', name: 'Duriel', figure: 'duriel',
+    hp: 1900, dmg: [20, 36], ar: 160, def: 64, speed: 4.6, xp: 4200,
+    radius: 0.52, ai: 'melee', wake: 20, attackRange: 1.8, attackCooldown: 0.9,
+    resists: { cold: 75, fire: 30, light: 30 }, boss: true, aura: '#7ad0ff',
+    enchant: 'cold', freezeImmune: true,
+  },
+  council: {
+    // The named third of the Travincal trio; the other two ride in as his
+    // guard pack. Hydra-flavoured fire from a council robe.
+    id: 'council', name: 'Ismail Vilehand', figure: 'councilmember',
+    hp: 800, dmg: [10, 20], ar: 130, def: 52, speed: 3.6, xp: 2600,
+    radius: 0.34, ai: 'caster', wake: 18, attackRange: 9, attackCooldown: 1.5,
+    resists: { fire: 85, light: 40 }, boss: true, aura: '#ff7a30',
+    keepDistance: 5,
+    bolt: { element: 'fire', min: 12, max: 24, speed: 11, colour: '#ff7a30' },
+  },
+  mephisto: {
+    // The gate of act three, and the first boss fought at range on both sides:
+    // his charged bolt homes, and his court of zealots holds the middle ground.
+    id: 'mephisto', name: 'Mephisto', figure: 'mephisto',
+    hp: 2100, dmg: [16, 30], ar: 170, def: 70, speed: 3.2, xp: 5200,
+    radius: 0.46, ai: 'caster', wake: 22, attackRange: 11, attackCooldown: 1.2,
+    resists: { light: 75, cold: 50, fire: 50, pois: 100 }, boss: true, aura: '#7a9aff',
+    freezeImmune: true, keepDistance: 6,
+    bolt: { element: 'light', min: 14, max: 28, speed: 12, colour: '#9ab0ff', homing: 0.7 },
+  },
   andariel: {
     id: 'andariel', name: 'Andariel', figure: 'andariel',
     hp: 1500, dmg: [16, 30], ar: 140, def: 58, speed: 3.5, xp: 3200,
@@ -97,7 +231,7 @@ export const UNIQUE_MODS = [
   { name: 'Lightning Enchanted', apply: (m) => { m.resists.light = 85; m.enchant = 'light'; } },
 ];
 
-export const ENCHANT_COLOUR = { fire: '#ff7a30', cold: '#7ad0ff', light: '#b0c8ff' };
+export const ENCHANT_COLOUR = { fire: '#ff7a30', cold: '#7ad0ff', light: '#b0c8ff', pois: '#8ac040' };
 
 // Growth per monster level. Health climbs fastest so later areas stay dangerous
 // even once the player's damage has scaled.

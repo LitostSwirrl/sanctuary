@@ -381,19 +381,12 @@ export function genTown(seed, def) {
   lv.waypoint = { x: cx - 5.5, y: cy - 3.5 };
   placeProp(lv, 'waypoint', cx - 6, cy - 4, rng, false);
 
-  // Where the townsfolk stand. `populateTown` places them relative to this, and
-  // each of these props is somebody's station: a tent to stand in front of, an
-  // anvil for the smith, a wagon for the caravan master.
+  // Where the townsfolk stand. `populateTown` places them relative to this,
+  // and each town's area def says what furniture its people stand among -- the
+  // encampment's tents, Lut Gholein's dock crates, Kurast's ferns. A stub town
+  // with no list gets bare ground, which is all a stub is owed.
   lv.townCentre = { x: cx, y: cy };
-  const station = [
-    ['tent', -4, -8], ['crate', -6, -7], ['barrel', -2, -7],          // Akara
-    ['anvil', 5, -7], ['tent', 3, -8], ['barrel', 6, -6],             // Charsi
-    ['tent', 8, 0], ['crate', 8, 3], ['crate', 7, 4],                 // Gheed
-    ['tent', -8, 0], ['barrel', -8, 3],                               // Cain
-    ['campfire', -2, 8], ['crate', -3, 9],                            // Kashya
-    ['wagon', 4, 8], ['barrel', 5, 10], ['crate', 3, 10],             // Warriv
-    ['campfire', 0, 0],                                               // the middle of camp
-  ];
+  const station = def.furniture || [];
   for (const [name, dx, dy] of station) {
     const x = Math.round(cx + dx), y = Math.round(cy + dy);
     if (propSafe(lv, x, y)) placeProp(lv, name, x, y, rng, name !== 'campfire');

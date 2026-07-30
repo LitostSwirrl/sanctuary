@@ -221,9 +221,9 @@ function getLevel(id) {
   const lv = generate(def, hashSeed(`${seed}:${id}`));
   if (def.monsters && def.monsters.length) populate(lv, def, lvRng, assets.figures);
   if (def.boss && !player.quests[def.quest]) spawnBoss(lv, def.boss, lvRng, assets.figures);
-  // Only the encampment has townsfolk so far. The Lut Gholein placeholder is a
-  // set with nobody standing on it until Phase 5 gives it its five.
-  if (lv.townCentre && id === 'town') populateTown(lv, lv.townCentre.x, lv.townCentre.y, assets.figures, player.cls);
+  // Any town with a cast gets it; populateTown filters the roster by the
+  // town's own id, so the fortress stub simply has nobody on its list yet.
+  if (lv.townCentre) populateTown(lv, lv.townCentre.x, lv.townCentre.y, assets.figures, player.cls, id);
   if (def.kind !== 'town') scatterWorldItems(lv, lvRng, 6 + Math.round(def.areaLevel * 0.8));
   levels.set(id, lv);
   return lv;
@@ -334,6 +334,23 @@ function killMonster(m) {
       // The gate of act one, not the end of the game: her flag is what opens
       // Warriv's road east. Baal is what sets `won`, in Task 12.
       grantQuest('andariel', 'Andariel is dead. Warriv will take the caravan east now.',
+        () => { player.statPoints += 5; player.skillPoints += 2; });
+    } else if (m.defId === 'radament') {
+      // The same shape as the Den's reward: a flag and a skill point.
+      grantQuest('radament', 'Radament is destroyed. What he studied sharpens you: a skill point.',
+        () => { player.skillPoints += 1; });
+    } else if (m.defId === 'duriel') {
+      // The gate of act two: his flag is what unties Meshif's ship.
+      grantQuest('duriel', 'Duriel is dead. Meshif will sail you east to Kurast now.',
+        () => { player.statPoints += 5; player.skillPoints += 2; });
+    } else if (m.defId === 'council') {
+      grantQuest('council', 'The High Council is broken. Travincal stands silent.',
+        () => { player.statPoints += 5; });
+    } else if (m.defId === 'mephisto') {
+      // The gate of act three, and the road out of the world of the living:
+      // Meshif's second sailing ends at the Pandemonium Fortress stub until
+      // Phase 6 builds the real act four.
+      grantQuest('mephisto', 'Mephisto is destroyed. Meshif will carry you on from these shores.',
         () => { player.statPoints += 5; player.skillPoints += 2; });
     }
   }

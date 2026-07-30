@@ -48,7 +48,9 @@ export class Monster extends Entity {
     this.repathCool = 0;
     this.leader = null;
     this.mods = [];
-    this.enchant = null;
+    // A definition can carry its enchant natively -- the scarab's jolt, the
+    // spider's bite -- and applyRank paints the matching glow either way.
+    this.enchant = def.enchant || null;
     this.special = def.special || null;
     this.specialCool = 2 + Math.random() * 3;
     this.phase = 0;
@@ -178,7 +180,13 @@ export function spawnBoss(level, bossId, rng, sheets) {
   level.boss = boss;
 
   // A boss keeps a guard of its own kind where that makes sense.
-  const guardOf = { corpsefire: 'fallen', bloodraven: 'skeleton', andariel: 'ghoul' }[bossId];
+  const guardOf = {
+    corpsefire: 'fallen', bloodraven: 'skeleton', andariel: 'ghoul',
+    radament: 'mummy', duriel: 'clawviper',
+    // The named unique is one third of the Travincal trio; his guard pack of
+    // council robes is the other two and then some.
+    council: 'councilmember', mephisto: 'councilmember',
+  }[bossId];
   if (guardOf) {
     spawnPack(level, guardOf, rng, {
       at: p, count: 4, sheets, mlvl: (level.areaLevel || 1) + 1, rank: 'normal',

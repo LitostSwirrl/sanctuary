@@ -53,6 +53,19 @@ export const BASES = [
   { id: 'sacredglobe', name: 'Sacred Globe', slot: 'weapon', kind: 'orb', w: 2, h: 2, tier: 2, dmg: [3, 8], req: { str: 0, dex: 0 }, caster: true },
   { id: 'smokedsphere', name: 'Smoked Sphere', slot: 'weapon', kind: 'orb', w: 2, h: 2, tier: 3, dmg: [4, 10], req: { str: 0, dex: 0 }, caster: true },
 
+  // ------------------------------------------------------------ tier four
+  // One base per weapon kind, gated by tierForAreaLevel to Act 3 ground and
+  // deeper, so the late acts drop visibly better steel than the Catacombs do.
+  { id: 'blade', name: 'Blade', slot: 'weapon', kind: 'blade', w: 1, h: 3, tier: 4, dmg: [6, 15], req: { str: 35, dex: 30 } },
+  { id: 'warsword', name: 'War Sword', slot: 'weapon', kind: 'sword', w: 2, h: 3, tier: 4, dmg: [8, 20], req: { str: 55, dex: 0 } },
+  { id: 'greataxe', name: 'Great Axe', slot: 'weapon', kind: 'axe', w: 2, h: 4, tier: 4, dmg: [16, 42], req: { str: 63, dex: 0 }, twoHand: true },
+  { id: 'maul', name: 'Maul', slot: 'weapon', kind: 'mace', w: 2, h: 4, tier: 4, dmg: [22, 40], req: { str: 69, dex: 0 }, twoHand: true, flanged: true },
+  { id: 'partizan', name: 'Partizan', slot: 'weapon', kind: 'polearm', w: 2, h: 4, tier: 4, dmg: [18, 46], req: { str: 62, dex: 35 }, twoHand: true },
+  { id: 'brandistock', name: 'Brandistock', slot: 'weapon', kind: 'spear', w: 2, h: 4, tier: 4, dmg: [16, 42], req: { str: 58, dex: 40 }, twoHand: true },
+  { id: 'grimwand', name: 'Grim Wand', slot: 'weapon', kind: 'wand', w: 1, h: 2, tier: 4, dmg: [4, 9], req: { str: 0, dex: 0 }, caster: true },
+  { id: 'runestaff', name: 'Rune Staff', slot: 'weapon', kind: 'staff', w: 2, h: 4, tier: 4, dmg: [10, 22], req: { str: 39, dex: 0 }, twoHand: true, caster: true },
+  { id: 'clearsphere', name: 'Clear Sphere', slot: 'weapon', kind: 'orb', w: 2, h: 2, tier: 4, dmg: [5, 12], req: { str: 0, dex: 0 }, caster: true },
+
   // ----------------------------------------------------------- body armour
   { id: 'quilted', name: 'Quilted Armour', slot: 'body', kind: 'body', w: 2, h: 3, tier: 1, def: [8, 11], req: { str: 12, dex: 0 } },
   { id: 'leatherarmor', name: 'Leather Armour', slot: 'body', kind: 'body', w: 2, h: 3, tier: 1, def: [14, 17], req: { str: 15, dex: 0 } },
@@ -60,6 +73,7 @@ export const BASES = [
   { id: 'ringmail', name: 'Ring Mail', slot: 'body', kind: 'body', w: 2, h: 3, tier: 2, def: [26, 31], req: { str: 25, dex: 0 } },
   { id: 'chainmail', name: 'Chain Mail', slot: 'body', kind: 'body', w: 2, h: 3, tier: 3, def: [36, 43], req: { str: 32, dex: 0 } },
   { id: 'breastplate', name: 'Breast Plate', slot: 'body', kind: 'body', w: 2, h: 3, tier: 3, def: [48, 58], req: { str: 42, dex: 0 } },
+  { id: 'platemail', name: 'Plate Mail', slot: 'body', kind: 'body', w: 2, h: 3, tier: 4, def: [62, 75], req: { str: 65, dex: 0 } },
 
   // ------------------------------------------------------------------ helms
   { id: 'cap', name: 'Cap', slot: 'head', kind: 'helm', w: 2, h: 2, tier: 1, def: [3, 5], req: { str: 0, dex: 0 } },
@@ -67,6 +81,7 @@ export const BASES = [
   { id: 'helm', name: 'Helm', slot: 'head', kind: 'helm', w: 2, h: 2, tier: 2, def: [15, 18], req: { str: 26, dex: 0 } },
   { id: 'fullhelm', name: 'Full Helm', slot: 'head', kind: 'helm', w: 2, h: 2, tier: 3, def: [23, 26], req: { str: 41, dex: 0 } },
   { id: 'mask', name: 'Mask', slot: 'head', kind: 'helm', w: 2, h: 2, tier: 3, def: [9, 27], req: { str: 23, dex: 0 } },
+  { id: 'greathelm', name: 'Great Helm', slot: 'head', kind: 'helm', w: 2, h: 2, tier: 4, def: [30, 35], req: { str: 63, dex: 0 } },
 
   // ---------------------------------------------------------------- shields
   { id: 'buckler', name: 'Buckler', slot: 'shield', kind: 'shield', w: 2, h: 2, tier: 1, def: [4, 6], block: 20, req: { str: 12, dex: 0 } },
@@ -74,6 +89,7 @@ export const BASES = [
   { id: 'largeshield', name: 'Large Shield', slot: 'shield', kind: 'shield', w: 2, h: 3, tier: 2, def: [12, 16], block: 24, req: { str: 34, dex: 0 } },
   { id: 'kiteshield', name: 'Kite Shield', slot: 'shield', kind: 'shield', w: 2, h: 3, tier: 3, def: [16, 20], block: 26, req: { str: 47, dex: 0 } },
   { id: 'boneshield', name: 'Bone Shield', slot: 'shield', kind: 'shield', w: 2, h: 3, tier: 3, def: [10, 30], block: 24, req: { str: 25, dex: 0 } },
+  { id: 'towershield', name: 'Tower Shield', slot: 'shield', kind: 'shield', w: 2, h: 3, tier: 4, def: [22, 30], block: 28, req: { str: 75, dex: 0 } },
 
   // ----------------------------------------------------------------- gloves
   { id: 'leathergloves', name: 'Leather Gloves', slot: 'gloves', kind: 'glove', w: 2, h: 2, tier: 1, def: [2, 3], req: { str: 0, dex: 0 } },
@@ -112,8 +128,10 @@ export const POTIONS = [
 export const POTION_BY_ID = {};
 for (const p of POTIONS) POTION_BY_ID[p.id] = p;
 
-// Which base tier an area of a given level can roll.
+// Which base tier an area of a given level can roll. Tier 4 opens where Act 3
+// does: the Spider Forest at level 21 is the first ground that can drop it.
 export function tierForAreaLevel(alvl) {
+  if (alvl >= 21) return 4;
   if (alvl >= 8) return 3;
   if (alvl >= 4) return 2;
   return 1;
