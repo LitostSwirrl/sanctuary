@@ -124,7 +124,13 @@ const BEST_GEAR = {
   },
 };
 
-function newGame(cls = 'sorceress') {
+// Two ways in. Classic is the game as written: level 1, the starter kit, the
+// Rogue Encampment, and no road east until Warriv has a reason to sell you one.
+// Yolo is the try-out door -- the cap, every skill, every waypoint and the chase
+// gear -- and it is a start condition only: nothing about it is written to the
+// save, because a character who began at the cap and one who climbed to it are
+// the same character by the time the file is read back.
+function newGame(cls = 'sorceress', mode = 'classic') {
   seed = (Math.floor(Math.random() * 0x7fffffff)) >>> 0;
   rng = new Rng(seed);
   levels.clear();
@@ -146,18 +152,28 @@ function newGame(cls = 'sorceress') {
   }
   player.gold = 80;
 
-  // Try-out boost: every new character starts fully maxed. Level cap through
-  // the normal xp path (so stat and skill points are granted as usual), every
-  // class skill hard-set to its 20-point cap, stat points spent evenly, and a
-  // purse deep enough to buy out any vendor. Delete this block to restore the
-  // level-1 start.
-  //
-  // The start level is LEVEL_CAP and is meant to be: the design pins this
-  // try-out character at the cap, so when the cap moved to 50 the boost moved
-  // with it. What that buys is 245 stat points to spread over the four stats
-  // where 30 bought 145. The skill points the climb grants are thrown away a few
-  // lines down, because every skill is set to its own cap by hand rather than
-  // paid for.
+  if (mode === 'yolo') applyYoloBoost(cls);
+
+  refreshPassives(player);
+  player.recalc(true);
+  enterArea('town', null, true);
+  state = 'playing';
+  titleStep = 'menu';
+  save(game);
+}
+
+// Try-out boost: a Yolo character starts fully maxed. Level cap through
+// the normal xp path (so stat and skill points are granted as usual), every
+// class skill hard-set to its 20-point cap, stat points spent evenly, and a
+// purse deep enough to buy out any vendor.
+//
+// The start level is LEVEL_CAP and is meant to be: the design pins this
+// try-out character at the cap, so when the cap moved to 50 the boost moved
+// with it. What that buys is 245 stat points to spread over the four stats
+// where 30 bought 145. The skill points the climb grants are thrown away a few
+// lines down, because every skill is set to its own cap by hand rather than
+// paid for.
+function applyYoloBoost(cls) {
   player.gainXp(xpForLevel(LEVEL_CAP));
   for (const sk of SKILLS) {
     if (CLASS_TREES[cls].includes(sk.tree)) player.skills[sk.id] = 20;
@@ -165,11 +181,11 @@ function newGame(cls = 'sorceress') {
   player.skillPoints = 0;
   const statOrder = ['str', 'dex', 'vit', 'ene'];
   for (let i = 0; player.statPoints > 0; i++) player.spendStat(statOrder[i % statOrder.length]);
-  // Money is no object, and every waypoint in this act already knows this hero.
-  // Act 1's only: the passage east is Warriv's to sell, and lighting Lut
-  // Gholein's stone here would hand the caravan's job to the waypoint panel.
+  // Money is no object, and every waypoint in every act already knows this hero:
+  // the point of the Yolo door is to stand anywhere in Sanctuary within a click,
+  // so the caravan's job is one this start is deliberately taking off him.
   player.gold = 9999999;
-  for (const wp of WAYPOINT_AREAS) if (AREA_BY_ID[wp].act === 1) player.waypoints[wp] = true;
+  for (const wp of WAYPOINT_AREAS) player.waypoints[wp] = true;
   for (const slot in BEST_GEAR[cls]) {
     const u = UNIQUE_BY_NAME[BEST_GEAR[cls][slot]];
     player.equipment[slot] = forgeItem(u.base, u.name, u.mods, 30, { rarity: 'unique', flavour: u.flavour });
@@ -178,13 +194,6 @@ function newGame(cls = 'sorceress') {
   // Fold the new gear into totals before refreshPassives reads them, so the
   // masteries see the amulet's +skills exactly as they do on a loaded save.
   player.recalc();
-
-  refreshPassives(player);
-  player.recalc(true);
-  enterArea('town', null, true);
-  state = 'playing';
-  titleStep = 'menu';
-  save(game);
 }
 
 function continueGame() {
@@ -943,6 +952,15 @@ const CLASS_CARDS = [
   { id: 'barbarian', name: 'Barbarian', line: 'Thirty pounds of steel, from no distance at all.' },
 ];
 
+// The two doors in, in the order they should be considered: the game as written
+// first, the try-out second. Picking one arms the class cards below -- the class
+// is still the click that starts the game.
+const MODE_CARDS = [
+  { id: 'classic', name: 'Classic', line: 'Level one, a starter kit, the road east shut.' },
+  { id: 'yolo', name: 'Yolo', line: 'Level fifty, every skill, every waypoint, best gear.' },
+];
+let startMode = 'classic';
+
 function drawClassSelect(cx, cy, s) {
   titleAreas = [];
   const w = 240 * s, h = 250 * s, gap = 40 * s;
@@ -967,10 +985,29 @@ function drawClassSelect(cx, cy, s) {
     ctx2d.fillText(c.line, x + w / 2, y + h - 32 * s);
     titleAreas.push({ x, y, w, h, id: c.id });
   });
+  // The mode row, in the cards' own columns so the two choices read as one
+  // screen: pick a start, then pick a class. The chosen mode is lit gold whether
+  // or not the pointer is on it, because it stays chosen after the pointer moves.
+  const mw = w, mh = 52 * s, my = cy + h / 2 + 44 * s;
+  MODE_CARDS.forEach((m, i) => {
+    const x = cx - mw - gap / 2 + i * (mw + gap);
+    const hov = Input.mouse.x >= x && Input.mouse.x < x + mw && Input.mouse.y >= my && Input.mouse.y < my + mh;
+    const on = startMode === m.id;
+    panel(ctx2d, x, my, mw, mh, { border: on ? '#c8a03a' : (hov ? '#8a7a4a' : '#5a4f36') });
+    ctx2d.textAlign = 'center';
+    ctx2d.fillStyle = on ? '#ffe08a' : (hov ? '#c8b070' : '#8a7f6a');
+    ctx2d.font = `${Math.round(17 * s)}px Georgia, serif`;
+    ctx2d.fillText(m.name, x + mw / 2, my + 22 * s);
+    ctx2d.fillStyle = on ? '#9a8f70' : '#6a6050';
+    ctx2d.font = `${Math.round(10 * s)}px Georgia, serif`;
+    ctx2d.fillText(m.line, x + mw / 2, my + 40 * s);
+    titleAreas.push({ x, y: my, w: mw, h: mh, id: `mode:${m.id}` });
+  });
+
   ctx2d.fillStyle = '#6a6050';
   ctx2d.font = `${Math.round(12 * s)}px Georgia, serif`;
   ctx2d.textAlign = 'center';
-  ctx2d.fillText('Esc to go back', cx, cy + h / 2 + 52 * s);
+  ctx2d.fillText('Esc to go back', cx, my + mh + 26 * s);
   ctx2d.textAlign = 'left';
 }
 let titleAreas = [];
@@ -1110,9 +1147,10 @@ canvas.addEventListener('pointerdown', (e) => {
   const x = (e.clientX - r.left) * dpr, y = (e.clientY - r.top) * dpr;
   for (const a of titleAreas) {
     if (x >= a.x && x < a.x + a.w && y >= a.y && y < a.y + a.h) {
-      if (a.id === 'new') { titleStep = 'class'; return; }
+      if (a.id === 'new') { titleStep = 'class'; startMode = 'classic'; return; }
       if (a.id === 'continue') { continueGame(); audio.ambient(level); return; }
-      newGame(a.id);                       // 'sorceress' | 'barbarian'
+      if (a.id.startsWith('mode:')) { startMode = a.id.slice(5); return; }
+      newGame(a.id, startMode);             // 'sorceress' | 'barbarian'
       audio.ambient(level);
       return;
     }
@@ -1125,7 +1163,7 @@ window.addEventListener('beforeunload', () => { if (state === 'playing') save(ga
 // about one frame a second, which makes the chunked loader take a minute under
 // automation and any rAF-based timing meaningless.
 window.__forceLoad = () => { while (state === 'loading') pumpLoading(); return true; };
-window.__newGame = (cls) => { newGame(cls); return areaId; };
+window.__newGame = (cls, mode) => { newGame(cls, mode); return areaId; };
 window.__continue = () => { continueGame(); return areaId; };
 window.__render = render;
 window.__step = step;
