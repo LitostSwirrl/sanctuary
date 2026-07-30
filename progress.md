@@ -163,6 +163,11 @@ run is what actually proves the single-file, no-server claim.
 | Frame time, Whirlwind live, 51-monster Den of Evil | 1.9 ms median, 3.8 ms at p95, budget 16.67 ms |
 | Level generation | 1-17 ms per area |
 | Line of sight, random open pairs in a dungeon | 13.1% clear — routes go around obstacles |
+| Cold bake to title, five acts (48 figures, 13 terrains, 31 props, icons) | 880-893 ms bake over three cold loads; 911 ms navigation to title; budget 1600 ms. Best-case: the Task 15 reviewer measured 923-952 ms on their machine |
+| Frame time, worst of four five-act scenes (River of Flame, 47 monsters, 69 hazards) | 2.6 ms median, 3.4 ms at p95; budget 16.67 ms. Best-case: the reviewer measured 8.3-10.9 ms at p95 on a 90-hazard flame scene, and 67-78 ms in every scene including an empty town when the live rAF loop competes with the probe loop — frame timing here is very sensitive to method |
+| Music scheduling cost | +0.1 ms at p95 against the same scene muted |
+| Standalone bundle, five acts | 651 KB (666,285 bytes), 36 modules, one file, no external refs |
+| Generation sweep, 37 areas × 30 seeds | 1110 levels, 1920 exits, 510 waypoints, 12,172 spawn points, 44,865 monsters: 0 unreachable exits, 0 waypoints that cannot be walked up to, 0 orphan spawns. A waypoint's own tile is a different question: roughly 2-4% of stones have a solid prop standing on them, which is cosmetic — see the note below |
 
 ## Notes for anyone picking this up
 
@@ -346,3 +351,43 @@ Phase log (What/Why/Next per phase):
   town. All four reviews clean with zero fix rounds; every number reproduced
   empirically by independent reviewers. Next: Phase 5, acts two and three
   (art then world, sequentially -- the desert, the jungle, Duriel, Mephisto).
+- **Phases 5-7, acts two through five and the ship gate (done, 2026-07-30)**:
+  the game runs end to end. What: Acts 2 and 3 (`a003d06`, `4876d19`) put
+  sixteen areas, thirteen monsters, the Lut Gholein and Kurast casts and the
+  Radament/council/Duriel/Mephisto quests on the same data-driven travel
+  pattern Act 1 established; Acts 4 and 5 (`f97b328`, `aedd6fb`) added
+  thirteen more areas, the obsidian and ice terrains, the River of Flame's
+  lava mechanism with its vent lights, twenty-four figures between them and
+  the real Baal victory; `45d68a7` split the start into Classic (level 1, one
+  waypoint, eighty gold) and Yolo (level 50, thirty skills at twenty, all
+  seventeen waypoints, chase gear), and `b63a591` retuned the xp curve so a
+  classic hero arrives at each of the five gate bosses inside its designed
+  level band. Then this task ran the spec's seven-point ship contract against
+  the built file, and the contract is met: 37 areas entered through all 64 of
+  their real exit legs both directions, seventeen waypoints lit and travelled
+  in both directions across all five acts, fourteen quest bosses killed on
+  their real kill paths with all four act gates refusing before the kill and
+  carrying afterwards, Baal setting the victory toast and the saved flag, 60
+  skills and 15 moods green, five classic pacing tapes landing 25 of 25 marks
+  in band, a mid-Act-3 save round-tripping everything but its buffs, a genuine
+  pre-effort v1 save loading and playing past the old level cap, and a 1110
+  level generation sweep with nothing unreachable. Why: two generator bugs
+  came out of the sweep rather than out of play, which is what a sweep is
+  for -- a prop ring or a channel of lava can seal off two or three floor
+  tiles without sealing an exit, and the old check asked only about exits, so
+  a pack could be put down in a pocket where nothing could reach it and it
+  could reach nothing. The flood `verifyReachable` was already running now
+  stays on the level, spawn points outside it are dropped, and pack members
+  are scattered only onto tiles inside it. Everything else the gate found was
+  a note, not a defect -- the largest of them being that a solid prop does
+  stand on the waypoint stone itself in roughly 2-4% of levels (8 of 510 stones
+  over 30 seeds here, 21 of 510 on the reviewer's seeds: an urn in the Bazaar,
+  a cactus in the Dry Hills, an icicle in the Highlands). It is cosmetic and
+  the gate's 17/17 lighting result stands: `checkTransitions` lights a stone
+  from 2.2 tiles away, so standing beside it is enough, and waypoint travel
+  arrives at the area's start point rather than on the stone. Verified on a
+  blocked case -- Bazaar with an urn on it, lit from 1.41 tiles, travelled into
+  and landed on walkable ground 9.2 tiles away. Next: the roadmap's second
+  effort -- Amazon, Necromancer and Paladin, per the Barbarian pattern.
+  Per-task record and the full gate evidence in
+  `.superpowers/sdd/2026-07-29-five-acts/`.

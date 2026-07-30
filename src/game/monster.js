@@ -111,6 +111,17 @@ export class Monster extends Entity {
   }
 }
 
+// Can a walker get from the level's entrance to here? A prop ring or a channel
+// of lava can seal a few floor tiles off without sealing an exit, and
+// `nearestOpen` walks the tile map, which knows nothing of either -- so it will
+// hand back a tile inside the pocket. `level.reachable` is the flood the
+// generator already ran with the props standing; levels made before it exists
+// answer yes, which is the old behaviour.
+function reachable(level, p) {
+  if (!level.reachable) return true;
+  return !!level.reachable[(p.y | 0) * level.w + (p.x | 0)];
+}
+
 // A pack: one leader rank plus bodies, all of the same definition.
 export function spawnPack(level, defId, rng, opts = {}) {
   const def = MONSTERS[defId];
@@ -132,8 +143,14 @@ export function spawnPack(level, defId, rng, opts = {}) {
   const place = (i) => {
     const a = rng.f() * Math.PI * 2;
     const d = i === 0 ? 0 : 0.7 + rng.f() * (1.1 + count * 0.22);
-    const p = level.nearestOpen(at.x + Math.cos(a) * d, at.y + Math.sin(a) * d, 6);
-    return p;
+    for (let tries = 0; tries < 6; tries++) {
+      const spin = a + tries * 1.05;
+      const p = level.nearestOpen(at.x + Math.cos(spin) * d, at.y + Math.sin(spin) * d, 6);
+      if (reachable(level, p)) return p;
+    }
+    // Every direction landed in a pocket. The spawn point itself was checked
+    // when the level was made, so stand on it.
+    return level.nearestOpen(at.x, at.y, 6);
   };
 
   let leader = null;

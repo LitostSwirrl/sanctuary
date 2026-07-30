@@ -151,17 +151,30 @@ function walkableFlood(lv, sx, sy) {
 
 function verifyReachable(lv) {
   const s = { x: Math.floor(lv.start.x), y: Math.floor(lv.start.y) };
-  const seen = walkableFlood(lv, s.x, s.y);
+  let seen = walkableFlood(lv, s.x, s.y);
   const bad = lv.exits.some((e) => !seen[Math.floor(e.y) * lv.w + Math.floor(e.x)]);
-  if (!bad) return;
-  // The tiles were already verified connected when the region was chosen, so a
-  // prop is what closed the way. Give up prop collision for this level: walking
-  // through a crate is invisible next to an exit nobody can reach. Lava is the
-  // one block that survives the amnesty -- it was proven not to seal anything
-  // when it was poured, and walking across the River of Flame is not invisible.
-  lv.solid.fill(0);
-  for (const p of lv.props) p.solid = false;
-  for (const i of lv.lavaTiles || []) lv.solid[i] = 1;
+  if (bad) {
+    // The tiles were already verified connected when the region was chosen, so a
+    // prop is what closed the way. Give up prop collision for this level: walking
+    // through a crate is invisible next to an exit nobody can reach. Lava is the
+    // one block that survives the amnesty -- it was proven not to seal anything
+    // when it was poured, and walking across the River of Flame is not invisible.
+    lv.solid.fill(0);
+    for (const p of lv.props) p.solid = false;
+    for (const i of lv.lavaTiles || []) lv.solid[i] = 1;
+    seen = walkableFlood(lv, s.x, s.y);
+  }
+  // What the flood reached is what a walker can reach, and the level keeps it:
+  // `populate` scatters a pack around its spawn point over the tile map, which
+  // knows nothing of props or lava, and either can close a few floor tiles off
+  // without closing an exit. A body put down in there is unreachable in both
+  // directions -- it never finds the player and the player never finds it.
+  lv.reachable = seen;
+  // The spawn points themselves are scattered the same blind way, so the same
+  // pocket can swallow a whole pack. Drop the point rather than move it: one
+  // pack in a level of forty is a density nobody can measure, and moving it
+  // would only land it on top of another.
+  lv.spawnPoints = lv.spawnPoints.filter((p) => seen[Math.floor(p.y) * lv.w + Math.floor(p.x)]);
 }
 
 // ----------------------------------------------------------------------- lava

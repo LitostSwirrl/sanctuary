@@ -16,7 +16,7 @@ node serve.js          # then open http://localhost:8231
 Or build the standalone file and open it directly, no server needed:
 
 ```
-node build.js          # writes diablo.html, ~300 KB, one file
+node build.js          # writes diablo.html, ~650 KB, one file
 ```
 
 There are no dependencies to install. Node is used only for the two scripts above.
@@ -50,15 +50,18 @@ something outside the panel and it lands on the floor.
 
 ## What is in it
 
-Six areas — Rogue Encampment, Blood Moor, Den of Evil, Cold Plains, Burial Grounds, Catacombs —
-generated from a seed, ending at Andariel. Nine monster types plus three bosses, with champion and
-unique packs that carry modifiers like Extra Fast and Cold Enchanted. Two playable classes,
-Sorceress and Barbarian, with twenty-eight skills across six trees — the Sorceress's three have real
+Five acts and thirty-seven areas, generated from a seed — the Rogue Encampment down through the
+Catacombs to Andariel, Lut Gholein and the desert to Duriel, Kurast and the jungle to Mephisto,
+the Pandemonium Fortress and the River of Flame to Diablo, then Harrogath and Mount Arreat to
+Baal in the Worldstone Chamber. Twenty-nine monster types plus fourteen quest bosses, with
+champion and unique packs that carry modifiers like Extra Fast and Cold Enchanted. Four of the
+bosses are act gates: kill her and the caravan master will take you east. Two playable classes,
+Sorceress and Barbarian, with sixty skills across six trees — the Sorceress's three have real
 synergies (points in Fire Bolt raise Fire Ball's damage), the Barbarian's trees lean on weapon
-masteries and warcries that root a pack in fear or leave it stunned, with two synergies of their own
-(Bash feeds Concentrate; Howl and Battle Cry feed War Cry). Fifty-three item bases
-across seven weapon classes, sixty affixes gated by item level, sixteen fixed uniques, and a grid
-inventory that honours item footprints.
+masteries and warcries that root a pack in fear or leave it stunned. Seventy-one item bases
+across nine weapon classes, sixty affixes gated by item level, thirty-two fixed uniques, and a grid
+inventory that honours item footprints. Fifteen moods of procedural score, one per act per place,
+so the town, the field and the dungeon each sound like where you are.
 
 Six people stand in the encampment and each of them does something. Akara heals you and sells
 casting gear; Charsi deals in steel; Gheed gambles, which is to say you buy the base type and find
@@ -120,10 +123,13 @@ Dependencies run one way: `core` → `art`/`audio` → `items` → `world`/`game
 |------|--------|
 | Generate all art (17 figures, 7 terrains, 18 props, 217 icons) | 358 ms to the title screen |
 | Generate all art (18 figures, Barbarian added) | 570-598 ms to the title screen (5 fresh reloads, median 587 ms — see progress.md) |
+| Generate all art (five acts: 48 figures, 13 terrains, 31 props, icons) | 880-893 ms bake, 911 ms from navigation to the title screen (budget 1600 ms); an independent run on another machine measured 923-952 ms, so read these as best-case |
 | Frame time, 2400x1472, Catacombs | 0.9 ms median, 1.3 ms at p95, budget 16.67 ms |
 | Frame time, Whirlwind live, 51-monster Den of Evil | 1.9 ms median, 3.8 ms at p95, budget 16.67 ms |
+| Frame time, worst of four five-act scenes (River of Flame, 47 monsters, 69 hazards burning) | 2.6 ms median, 3.4 ms at p95, budget 16.67 ms; an independent run on a heavier scene and another machine measured 8.3-10.9 ms at p95, so read this as best-case too |
 | Level generation | 1–17 ms per area |
-| Standalone bundle | 369 KB, 36 modules, one file |
+| Generation sweep, 37 areas × 30 seeds | 1110 levels: 0 unreachable exits, 0 waypoints you cannot walk up to, 0 orphan spawns |
+| Standalone bundle | 651 KB, 36 modules, one file |
 
 ## Notes
 
@@ -163,8 +169,10 @@ where the pushing stops.
 
 Effort-sized, in order. Each lands ship-gated or not at all.
 
-1. **Five acts, full trees, real score** — in flight. Spec and plan under
-   `docs/superpowers/`; the hum dies, both trees reach thirty, the world reaches Baal.
+1. **Five acts, full trees, real score** — shipped 2026-07-30. The hum is dead and fifteen
+   per-act moods play in its place; both trees reach thirty; the world runs from the Rogue
+   Encampment to the Worldstone Chamber — 37 areas, fourteen quest bosses, four act gates,
+   Baal at the end of it. Spec, plan and the ship-gate record under `docs/superpowers/`.
 2. **The other three** — Amazon, Necromancer, Paladin. Per the Barbarian pattern each is a
    figure, a tree and data; the Necromancer's summons ride the pet machinery Hydra added,
    Paladin auras ride the buff hooks, and the Amazon brings bows, the one genuinely new
