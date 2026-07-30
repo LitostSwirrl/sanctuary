@@ -7,7 +7,7 @@
 // why a mastery can drive a resistance negative and multiply damage.
 
 export const RES_CAP = 75;
-export const LEVEL_CAP = 30;
+export const LEVEL_CAP = 50;
 
 const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
 
@@ -77,8 +77,13 @@ export function maxManaFor(cls, level, ene, bonusFlat = 0, bonusPct = 0) {
 // ---------------------------------------------------------------- experience
 
 // Shaped like the original's curve rather than copied from its table: a smooth
-// power law tuned so a full run of this slice lands the player somewhere in the
-// high teens to low twenties, with 30 as a hard cap.
+// power law. Which is why the cap moving from 30 to 50 asked nothing of it -- a
+// law is not a table, so it already had a value at 49, and the same shape
+// carries the whole five-act climb. 296,857 to stand at 30; 941,247 to stand at
+// 50, a little over three times as far for twenty more levels, with each level
+// costing about a thousand more than the one before it. The two constants are
+// the pacing lever and belong to the pacing pass, which tunes them against
+// real kill paths rather than against arithmetic.
 export function xpForLevel(n) {
   if (n <= 1) return 0;
   return Math.floor(180 * Math.pow(n - 1, 2.2));

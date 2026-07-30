@@ -7,8 +7,22 @@
 
 import { BASE_BY_ID, POTION_BY_ID } from './items/bases.js';
 import { EQUIP_SLOTS } from './game/player.js';
+import { AREA_BY_ID } from './world/levels.js';
 
+// The slot name is frozen at v1 and stays frozen. Renaming it with each version
+// would orphan exactly the saves a version number exists to protect; the record
+// inside carries the version, and `migrate` brings an older one forward.
 const KEY = 'sanctuary.save.v1';
+const VERSION = 2;
+
+// Which act a record belongs to. The area id is the authority on that -- the
+// area defs carry the act -- so a v1 record is not missing the information, only
+// leaving it unsaid. That is why the migration below is a default and never a
+// guess.
+function actFor(areaId) {
+  const a = AREA_BY_ID[areaId];
+  return a ? a.act : 1;
+}
 
 function packItem(it) {
   if (!it) return null;
@@ -55,9 +69,10 @@ function unpackItem(o, nextUid) {
 export function save(game) {
   const p = game.player;
   const data = {
-    v: 1,
+    v: VERSION,
     seed: game.seed,
     area: game.areaId,
+    act: actFor(game.areaId),
     at: { x: +p.x.toFixed(2), y: +p.y.toFixed(2) },
     cls: p.cls,
     level: p.level, xp: Math.round(p.xp),
@@ -83,14 +98,31 @@ export function save(game) {
   }
 }
 
+// The one place a record written by an older build is brought forward. Every
+// reader -- load, hasSave, continueGame -- comes through here, so there is no
+// second seam to keep in step. A v1 record needs nothing but its act bit: it
+// stored a character, a seed and a set of flags, all of which this build reads
+// unchanged, and the cap raise reaches it for free because the cap was never
+// written down. A version this build has never heard of is refused rather than
+// guessed at.
+function migrate(d) {
+  if (d.v === VERSION) return d;
+  if (d.v === 1) {
+    d.act = actFor(d.area);
+    d.v = VERSION;
+    return d;
+  }
+  return null;
+}
+
 export function load() {
   let raw;
   try { raw = localStorage.getItem(KEY); } catch { return null; }
   if (!raw) return null;
   try {
     const d = JSON.parse(raw);
-    if (!d || d.v !== 1) return null;
-    return d;
+    if (!d || typeof d.v !== 'number') return null;
+    return migrate(d);
   } catch {
     return null;
   }

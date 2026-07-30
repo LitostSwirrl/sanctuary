@@ -14,6 +14,10 @@ export class Level {
     this.w = w; this.h = h;
     this.def = def;
     this.id = def.id;
+    // Stamped at generation so anything holding a level knows which act it is
+    // standing in without a second lookup. The music asks this every time the
+    // player walks through a door.
+    this.act = def.act || 1;
     this.name = def.name;
     this.terrain = def.terrain;
     this.pathTerrain = def.pathTerrain || def.terrain;

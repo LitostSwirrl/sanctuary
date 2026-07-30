@@ -151,6 +151,13 @@ function newGame(cls = 'sorceress') {
   // class skill hard-set to its 20-point cap, stat points spent evenly, and a
   // purse deep enough to buy out any vendor. Delete this block to restore the
   // level-1 start.
+  //
+  // The start level is LEVEL_CAP and is meant to be: the design pins this
+  // try-out character at the cap, so when the cap moved to 50 the boost moved
+  // with it. What that buys is 245 stat points to spread over the four stats
+  // where 30 bought 145. The skill points the climb grants are thrown away a few
+  // lines down, because every skill is set to its own cap by hand rather than
+  // paid for.
   player.gainXp(xpForLevel(LEVEL_CAP));
   for (const sk of SKILLS) {
     if (CLASS_TREES[cls].includes(sk.tree)) player.skills[sk.id] = 20;
