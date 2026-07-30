@@ -80,6 +80,41 @@ function wrapNoise(rng, pw, ph, cell) {
 const clampB = (v) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
 const mulC = (c, k) => packRGB(clampB((c & 255) * k), clampB(((c >>> 8) & 255) * k), clampB(((c >>> 16) & 255) * k), 255);
 
+// How hard the per-pixel grain bites, as the peak fraction of a texel's value
+// the jitter moves it. This is the tuning knob. The smooth fields above are
+// what kills the tile grid, but at pixel scale they are pure gradient --
+// adjacent texels a luminance unit or two apart -- and the eye reads acres of
+// gradient as out of focus, while every figure shows hard pixel steps. The
+// grain puts the pixel back in the floor without touching the large shapes.
+// Tried: 0.10 (film grain, still soft), 0.20 (packed dirt), 0.30 (gravel).
+// Shipped 0.24, medium leaning coarse: LoD ground is gritty before it is soft.
+const GRAIN = 0.24;
+
+// Overlay deterministic grain on a baked buffer: every opaque texel takes a
+// value jitter hashed from its own coordinates, so the same texel always
+// jitters the same way. On the wrapping fields the coordinate domain IS the
+// torus, so the grain tiles exactly as the field does and aligns with nothing
+// on the tile lattice. Jitter is symmetric about zero and multiplies the
+// colour, so the ramp keeps its hue and its mean value -- this darkens
+// nothing and saturates nothing. One texel in eight takes a double kick,
+// which is the difference between grit and monitor noise.
+function grainOverlay(buf, salt) {
+  const { w, h, data } = buf;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const c = data[i];
+      if (!(c >>> 24)) continue;
+      let hh = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ salt) >>> 0;
+      hh = Math.imul(hh ^ (hh >>> 13), 2246822519) >>> 0;
+      hh ^= hh >>> 16;
+      let j = ((hh & 1023) / 511.5 - 1) * GRAIN;
+      if (!(hh & 0xe000)) j *= 2;
+      data[i] = mulC(c, 1 + j);
+    }
+  }
+}
+
 // Plot into the field with wrap, so a detail stroke that runs off one edge comes
 // back in on the other and the field still tiles with itself. The scattered
 // speckles get away without this because they are a pixel or two wide; a ripple
@@ -210,6 +245,9 @@ function bakeGroundField(terrain, rng) {
     }
   }
 
+  // Last, over everything: detail and slab joints are part of the floor and
+  // grain like the rest of it.
+  grainOverlay(buf, rng.seed);
   return buf;
 }
 
@@ -311,6 +349,9 @@ function bakeWallFace(terrain, rng) {
   lineP(buf, 0, 16, 0, 16 + H, joint);
   lineP(buf, 63, 16, 63, 16 + H, joint);
   lineP(buf, 32, 31, 32, 31 + H, packRGB(0, 0, 0, 45));
+  // Faces grain too, or a sharp floor stops dead at a soft wall and the
+  // mismatch just moves house. Faces need no wrap; the joints own the seams.
+  grainOverlay(buf, rng.seed);
   return buf;
 }
 
@@ -326,6 +367,7 @@ function bakeTopField(s, rng) {
       buf.data[y * FIELD_W + x] = mulC(c0, 1 + v);
     }
   }
+  grainOverlay(buf, rng.seed);
   return buf;
 }
 
