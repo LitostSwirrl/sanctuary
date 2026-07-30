@@ -153,6 +153,29 @@ function poseAngles(anim, t, spec) {
     p.elbowL = 0.3 + k * 0.4; p.elbowR = 0.3 + k * 0.3;
     p.roll = k * 0.35;
   }
+
+  // Nothing that floats plants a foot. The stride above is replaced by a hover:
+  // the whole body rides higher and the legs hang wherever the arms have got to,
+  // so idle and walk differ only in how far he rises and how much he sways.
+  // Death is left alone -- a thing that dies stops holding itself up.
+  if (spec.float && anim !== 'death') {
+    const h = Math.sin(ph);
+    // Attack and cast throw the arms up, so those two ride lower: the hover and
+    // a raised hand together would push a hand through the top of the cell.
+    const hover = anim === 'walk' ? 7.5 : anim === 'idle' ? 6 : 4.5;
+    p.bob = hover + h * (anim === 'walk' ? 2 : 1.4);
+    p.sink = 0;
+    p.hipL = 0.34; p.hipR = 0.2;
+    p.kneeL = 0.62 + h * 0.06; p.kneeR = 0.5 - h * 0.06;
+    if (anim === 'idle' || anim === 'walk') {
+      p.shoulderL = -0.12 + h * 0.07;
+      p.shoulderR = -0.12 - h * 0.07;
+      p.armOutL = 0.34; p.armOutR = -0.34;
+      p.elbowL = 0.5; p.elbowR = 0.5;
+      p.twist = h * 0.06;
+      p.lean = spec.build.hunch - 0.05;
+    }
+  }
   return p;
 }
 
@@ -276,12 +299,72 @@ function segments(spec, j, R, anim, t, a) {
     ];
   }
 
-  for (const side of ['legL', 'legR']) {
-    const L = j[side];
-    add('capsule', [L.hip, L.knee, b.thighR * S, b.shinR * S * 1.15], legRamp, dep(L.hip, L.knee) - 0.5);
-    add('capsule', [L.knee, L.foot, b.shinR * S * 1.1, b.shinR * S * 0.85], legRamp, dep(L.knee, L.foot) - 0.4);
-    add('capsule', [L.foot, [L.foot[0] + 2.6 * S, L.foot[1], Math.max(0.6, L.foot[2])], b.shinR * S * 0.95, b.shinR * S * 0.8],
-      R.boot || R.cloth2 || R.cloth, dep(L.foot) - 0.3);
+  // Crawlers, serpents and insects have no pair of legs to stand on: the poser
+  // still computes them, and the parts below draw whatever the creature walks
+  // on instead.
+  if (!P.noLegs) {
+    for (const side of ['legL', 'legR']) {
+      const L = j[side];
+      add('capsule', [L.hip, L.knee, b.thighR * S, b.shinR * S * 1.15], legRamp, dep(L.hip, L.knee) - 0.5);
+      add('capsule', [L.knee, L.foot, b.shinR * S * 1.1, b.shinR * S * 0.85], legRamp, dep(L.knee, L.foot) - 0.4);
+      add('capsule', [L.foot, [L.foot[0] + 2.6 * S, L.foot[1], Math.max(0.6, L.foot[2])], b.shinR * S * 0.95, b.shinR * S * 0.8],
+        R.boot || R.cloth2 || R.cloth, dep(L.foot) - 0.3);
+    }
+  }
+
+  // A grub drags its length behind it: rings that swell just off the head end
+  // and taper to the tail, each wriggling out of step with the one ahead. The
+  // body rides low, so the reared front is the only part above knee height.
+  if (P.crawl) {
+    const rm = R.chitin || R.cloth2 || R.cloth;
+    // Segments stay short and the tail keeps its own radius clear of the floor.
+    // Sideways in this projection is also downwards, so a long body laid flat
+    // runs off the bottom of the cell where the sprite has only ten pixels of
+    // room below the feet.
+    const seg = 4.6 * S, wob = anim === 'death' ? 0 : 1.6 * S;
+    for (let i = 0; i < P.crawl; i++) {
+      const k = i / P.crawl;
+      const r0 = b.torsoR * S * (1.02 - k * 0.5), r1 = b.torsoR * S * (1.02 - (k + 1 / P.crawl) * 0.5);
+      const u0 = Math.max(r0 * 1.15, j.pelvis[2] * (1 - k * 0.5));
+      const u1 = Math.max(r1 * 1.15, j.pelvis[2] * (1 - (k + 1 / P.crawl) * 0.5));
+      const p0 = [j.pelvis[0] - i * seg, j.pelvis[1] + Math.sin(t * TAU + i * 0.9) * wob, u0];
+      const p1 = [j.pelvis[0] - (i + 1) * seg, j.pelvis[1] + Math.sin(t * TAU + (i + 1) * 0.9) * wob, u1];
+      add('capsule', [p0, p1, r0, r1], rm, dep(p0, p1) - 0.6 - i * 0.1);
+    }
+  }
+
+  // Insect legs: a splayed pair per body station, knee up and out, foot planted
+  // wide of the body. They scuttle out of phase on the walk, which is what sells
+  // a thing with too many legs as moving rather than sliding.
+  if (P.bugLegs) {
+    const rm = R.chitin || R.cloth2 || R.cloth;
+    const n = P.bugLegs;
+    for (let i = 0; i < n; i++) {
+      const f = lerp(5, -7, n === 1 ? 0 : i / (n - 1)) * S;
+      for (const side of [-1, 1]) {
+        const lift = anim === 'walk'
+          ? Math.max(0, Math.sin(t * TAU + i * 1.7 + (side > 0 ? Math.PI : 0))) * 2.4 * S : 0;
+        const hip = [j.pelvis[0] + f, side * b.hipSide * S * 0.9, j.pelvis[2]];
+        const knee = [hip[0] + f * 0.25, side * (b.hipSide + 8) * S, j.pelvis[2] + 5 * S];
+        const foot = [hip[0] + f * 0.7, side * (b.hipSide + 13) * S, lift + 0.6];
+        add('capsule', [hip, knee, 1.7 * S, 1.3 * S], rm, dep(hip, knee) - 0.2);
+        add('capsule', [knee, foot, 1.3 * S, 0.7 * S], rm, dep(knee, foot) - 0.1);
+      }
+    }
+  }
+
+  // A serpent stands on its own body: the length piles into a coil and the
+  // trunk rises out of it, with the tail thrown clear so the pile still reads
+  // as one animal rather than a heap of stones.
+  if (P.coil) {
+    const rm = R.scales || R.cloth2 || R.cloth;
+    for (let i = 0; i < 3; i++) {
+      const c = [j.pelvis[0] * 0.5, j.pelvis[1], (3 + i * 5) * S];
+      add('ellipse', [c, (9.5 - i * 2.2) * S], rm, -0.8 + i * 0.1);
+    }
+    const tb = [j.pelvis[0] * 0.5 - 4 * S, j.pelvis[1] + 3 * S, 3 * S];
+    const tt = [tb[0] - 13 * S, tb[1] + 13 * S + (anim === 'death' ? 0 : Math.sin(t * TAU) * 2 * S), 2 * S];
+    add('capsule', [tb, tt, 3.4 * S, 0.8 * S], rm, dep(tb, tt) - 1.0);
   }
 
   // A robe is a flared skirt, not a tube: it stops at mid-shin and swells at
@@ -297,6 +380,13 @@ function segments(spec, j, R, anim, t, a) {
   // A yoke across the shoulder joints. Without it the outline pass severs a
   // wide-shouldered figure's arms from its chest whenever a gap opens.
   add('capsule', [j.armL.sh, j.armR.sh, b.armR * S * 1.1, b.armR * S * 1.1], R.cloth, dep(j.chest) + 0.05);
+
+  // A domed carapace over the back, set behind the torso so the body still
+  // shows at the shoulders. On the beetles it is most of the silhouette.
+  if (P.shell) {
+    const c = [j.chest[0] - 2.5 * S, j.chest[1], lerp(j.pelvis[2], j.chest[2], 0.55)];
+    add('ellipse', [c, b.torsoR * S * 1.45], R.chitin || R.cloth, dep(j.chest) - 0.9);
+  }
 
   if (P.ribs) {
     for (let i = 0; i < 3; i++) {
@@ -340,6 +430,34 @@ function segments(spec, j, R, anim, t, a) {
     const top = [j.chest[0] - 1.5 * S, j.chest[1], j.chest[2] + 2 * S];
     const bot = [top[0] - 4 * S - (anim === 'walk' ? 2 * S * Math.sin(t * TAU) : 0), j.chest[1], 4 * S];
     add('capsule', [top, bot, b.torsoR * S * 0.9, b.torsoR * S * 1.25], R.cape || R.cloth, dep(j.chest) - 1.2);
+  }
+  // Wings as a spar with three heavy pinions hung off it, folded in rather than
+  // spread: a wing held out to full span turns a vulture into a scarecrow, and
+  // both wings sit behind the body because at eighty pixels a near wing
+  // occluding the chest costs more silhouette than the depth it buys.
+  if (P.wings) {
+    const rm = R.wing || R.cape || R.cloth;
+    const flap = anim === 'idle' || anim === 'walk' ? Math.sin(t * TAU) : 0;
+    for (const side of [-1, 1]) {
+      const root = [j.chest[0] - 2 * S, side * b.shoulder * S * 0.7, j.chest[2] + 2 * S];
+      // The tip rises only a little: out to the side is also up the screen in
+      // this projection, so a wing held high clips the roof of the cell.
+      const wrist = [root[0] - 5 * S, side * (b.shoulder + 8 + flap * 1.5) * S, root[2] + (2 + flap * 2) * S];
+      add('capsule', [root, wrist, 3.0 * S, 1.6 * S], rm, dep(root, wrist) - 1.4);
+      for (let i = 0; i < 3; i++) {
+        const k = i / 2;
+        const from = [lerp(root[0], wrist[0], k), lerp(root[1], wrist[1], k), lerp(root[2], wrist[2], k)];
+        const to = [from[0] - (3 + k * 5) * S, from[1] + side * (1 + k * 3) * S, from[2] - (13 + k * 8 - flap * 3) * S];
+        add('capsule', [from, to, 2.8 * S, 1.0 * S], rm, dep(from, to) - 1.5);
+      }
+    }
+  }
+  // A hooked beak, wide at the head and drawn well forward. Given any less mass
+  // than this it disappears into the skull at game zoom.
+  if (P.beak) {
+    const base = [j.head[0] + b.headR * S * 0.55, j.head[1], j.head[2] - 0.5 * S];
+    const tip = [base[0] + 6.5 * S, j.head[1], base[2] - 3 * S];
+    add('capsule', [base, tip, 2.6 * S, 0.6 * S], R.horn || R.bone || R.skin, dep(j.head) + 0.6);
   }
   if (P.spikes) {
     for (let i = 0; i < 4; i++) {
@@ -580,6 +698,18 @@ const IMP_BUILD = {
   shoulder: 9.5, hipSide: 4.4,
   thighR: 3.2, shinR: 2.7, armR: 2.5, foreR: 2.1,
   torsoR: 6.0, neckR: 2.6, hunch: 0.35,
+};
+
+// Crawlers keep the same skeleton but wear it flat: the hips are almost on the
+// floor and the chest is barely above them, so the torso capsule reads as the
+// reared front of a body whose length is drawn by `crawl` trailing behind.
+const GRUB_BUILD = {
+  ...DEFAULT_BUILD,
+  thigh: 8, shin: 7, upperArm: 7, foreArm: 6.5,
+  hipU: 9, chestU: 18, neckU: 21, headU: 26, headR: 6.4,
+  shoulder: 6, hipSide: 4,
+  thighR: 2.6, shinR: 2.2, armR: 2.2, foreR: 1.8,
+  torsoR: 7.4, neckR: 2.4, hunch: 0.55,
 };
 
 export const FIGURE_SPECS = {
@@ -865,6 +995,310 @@ export const FIGURE_SPECS = {
     weapon: 'none',
     eyeColor: '#9aff3a', eyeGlow: true,
     build: { ...DEFAULT_BUILD, torsoR: 5.8, shoulder: 11.5, headR: 5.4, hunch: 0.1 },
+  }),
+
+  // ----------------------------------------------------------------- act two
+  //
+  // The desert roster. Everything out here is bleached: linen, chitin and old
+  // bone under a sun that has taken the colour out of all three. Nothing in
+  // this act is allowed a bright surface except an eye.
+
+  // A raider in wrapped linen with a curved blade. Human proportions, so the
+  // wrap and the scimitar are the whole read; the linen stays dirty enough to
+  // sit against sand without glowing off it.
+  sandraider: humanoid({
+    palette: {
+      skin: '#8a6a4a', cloth: '#786d55', cloth2: '#4e4535', trim: '#8a6a3a',
+      hair: '#241c16', metal: COLORS.darkSteel, wood: COLORS.wood,
+      bone: COLORS.boneShadow, boot: COLORS.leather,
+    },
+    scale: 1.0,
+    parts: { hood: true, bareArms: true, belt: true },
+    weapon: 'sword',
+    eyeColor: '#e8d8a8',
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: { ...DEFAULT_BUILD, shoulder: 12, torsoR: 6.2, headR: 5.3, hunch: 0.08 },
+  }),
+
+  // Carrion on two legs: hunched hard, small skull thrown forward, a beak, and
+  // wings folded high behind the shoulders. The feathers are nearly black --
+  // a vulture is a silhouette, not a plumage study.
+  vulturedemon: humanoid({
+    palette: {
+      skin: '#6a5f52', cloth: '#3a352c', cloth2: '#2b2721', wing: '#2a251e',
+      hair: '#2b2721', bone: COLORS.boneShadow, horn: '#8a7f66',
+      metal: COLORS.darkSteel, wood: COLORS.wood, trim: '#5a4a32',
+    },
+    scale: 0.98,
+    parts: { wings: true, beak: true, hair: true, bareArms: true, bareLegs: true },
+    weapon: 'none',
+    eyeColor: '#d8b03a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD, hunch: 0.5, headF: 2,
+      torsoR: 5.4, shoulder: 11.5, headR: 4.8, thighR: 3.0, shinR: 2.4,
+    },
+  }),
+
+  // The sand maggot: a pale grub reared up on the front of its own length. Its
+  // arms are vestigial feelers, which is why they are drawn thin -- everything
+  // this thing has goes into the body behind it.
+  sandmaggot: humanoid({
+    palette: {
+      skin: '#8a7a62', cloth: '#7a6a52', cloth2: '#5e5140', chitin: '#6a5c46',
+      hair: '#5e5140', bone: COLORS.boneShadow, horn: '#7a6a4a',
+      metal: COLORS.darkSteel, wood: COLORS.wood, trim: COLORS.leather,
+    },
+    // Bigger than the grub default: at the crawler's low build a scale under one
+    // is a pellet on the floor rather than something that eats a man.
+    scale: 1.06,
+    parts: { crawl: 5, noLegs: true, bareArms: true, fangs: true },
+    weapon: 'none',
+    eyeColor: '#c8b84a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...GRUB_BUILD,
+      hipU: 10, chestU: 22, neckU: 25, headU: 30, headR: 7.0, torsoR: 8.2,
+    },
+  }),
+
+  // A beetle the size of a dog: shell, six legs, horns for mandibles. The dull
+  // copper in the carapace is as far as the lightning flavour goes -- a
+  // creature that lit itself would break the ground it stands on.
+  scarab: humanoid({
+    palette: {
+      skin: '#3e3a30', cloth: '#443c2c', cloth2: '#332d22', chitin: '#4e4432',
+      hair: '#332d22', bone: COLORS.boneShadow, horn: '#6a5a3a',
+      metal: COLORS.darkSteel, wood: COLORS.wood, trim: '#5a4a2a',
+    },
+    scale: 0.8,
+    parts: { bugLegs: 3, noLegs: true, shell: true, horns: true, fangs: true },
+    weapon: 'none',
+    eyeColor: '#c8a83a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: { ...GRUB_BUILD, hipU: 11, chestU: 17, neckU: 19, headU: 22, headR: 5.4, torsoR: 6.6, hunch: 0.7 },
+  }),
+
+  // Tomb viper: a humanoid trunk out of a coiled snake body, blade in hand. The
+  // coil is what carries it -- the torso alone would be a man kneeling.
+  clawviper: humanoid({
+    palette: {
+      skin: '#5c6a54', cloth: '#48543f', cloth2: '#38422f', scales: '#3f4a3a',
+      hair: '#2a3324', bone: COLORS.boneShadow, horn: '#8a8268',
+      metal: COLORS.darkSteel, wood: COLORS.wood, trim: '#7a6a3a',
+    },
+    scale: 0.98,
+    parts: { coil: true, noLegs: true, horns: true, bareArms: true, fangs: true },
+    weapon: 'sword',
+    eyeColor: '#c8e84a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD, hipU: 20, chestU: 36, neckU: 39, headU: 44, headR: 5.2,
+      torsoR: 5.6, shoulder: 10.5, hunch: 0.14,
+    },
+  }),
+
+  // Mummy: the zombie's shamble in grave linen. Bandage bands across the chest
+  // are the rib part in a linen colour, and the eyes stay dark -- a corpse
+  // wrapped by hand is not lit from inside, it is just old.
+  mummy: humanoid({
+    palette: {
+      skin: '#8a8068', cloth: '#7a7256', cloth2: '#5e5744', bone: '#9a9278',
+      hair: '#4a4436', wood: COLORS.wood, metal: COLORS.darkSteel, trim: COLORS.leather,
+    },
+    scale: 0.96,
+    parts: { bareArms: true, bareLegs: true, ribs: true },
+    weapon: 'none',
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: { ...DEFAULT_BUILD, hunch: 0.42, torsoR: 6.0, shoulder: 10, headR: 5.6 },
+  }),
+
+  // Greater mummy: the same wrapping with a priest's robe and staff over it,
+  // and the first light allowed on the roster -- a dull gold in the sockets,
+  // because something is still awake in there. Radament's kind.
+  greatermummy: humanoid({
+    palette: {
+      skin: '#8a8068', cloth: '#6a6248', cloth2: '#4e4736', bone: '#9a9278',
+      hair: '#4a4436', wood: COLORS.wood, metal: COLORS.gold, trim: COLORS.gold,
+      gem: '#c8a83a',
+    },
+    scale: 1.0,
+    parts: { robe: true, hood: true, bareArms: true, ribs: true, belt: true },
+    weapon: 'staff',
+    eyeColor: '#c8a83a', eyeGlow: true,
+    // Stooped by a few units against the human build. A staff is measured off
+    // the head, so a full-height caster's stave goes through the cell roof.
+    build: {
+      ...DEFAULT_BUILD, hunch: 0.3, torsoR: 6.0, shoulder: 10.5, headR: 5.6,
+      hipU: 31, chestU: 45, neckU: 47, headU: 52,
+    },
+  }),
+
+  // Duriel. A grub the size of a cart: the crawler recipe at boss scale, with a
+  // horned skull and arms heavy enough to matter. Cold grey-blue chitin rather
+  // than ice-bright, so he still belongs to the tomb he is buried in.
+  duriel: humanoid({
+    palette: {
+      skin: '#7a8288', cloth: '#6a727a', cloth2: '#4e565e', chitin: '#5e666e',
+      hair: '#4e565e', horn: '#c8c0a8', bone: COLORS.boneWhite,
+      metal: COLORS.darkSteel, wood: COLORS.wood, trim: '#8a8f96',
+    },
+    // The andariel ceiling: big enough to own the room, short enough that the
+    // idle bob never pokes a horn through the top of the cell.
+    scale: 1.18,
+    // Three rings, not five: Duriel is stout rather than long, and at this scale
+    // every ring behind him is another ten pixels down the screen.
+    parts: { crawl: 3, noLegs: true, shell: true, horns: true, bareArms: true, fangs: true },
+    weapon: 'none',
+    eyeColor: '#9adcff', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...GRUB_BUILD,
+      hipU: 12, chestU: 26, neckU: 30, headU: 36, headR: 7.4,
+      torsoR: 9.0, shoulder: 11, upperArm: 11, foreArm: 10,
+      armR: 3.6, foreR: 3.0, hunch: 0.3,
+    },
+  }),
+
+  // --------------------------------------------------------------- act three
+  //
+  // The jungle roster. Everything here is wet: blue-grey imps, bark, chitin and
+  // rotted brocade. The act's one bright note is the Council's gold, and even
+  // that is tarnished.
+
+  // Flayer: the Fallen's frame in jungle colours. Smaller and bluer than its
+  // desert cousins, and it keeps the club, because a flayer is a fallen imp
+  // that learned to hunt in packs of ten.
+  flayer: humanoid({
+    palette: {
+      skin: '#4a5a5e', cloth: '#3a4a3a', cloth2: COLORS.leather, hair: '#2a3a2e',
+      bone: COLORS.boneShadow, horn: '#8a8268', wood: COLORS.wood,
+      metal: COLORS.darkSteel, trim: COLORS.leather,
+    },
+    scale: 0.78,
+    parts: { horns: true, bareArms: true, bareLegs: true, fangs: true },
+    weapon: 'club',
+    eyeColor: '#e8f04a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: IMP_BUILD,
+  }),
+
+  // Flayer shaman: the shaman recipe, rotted green. Same hooded stoop, same
+  // staff, and the same job -- it is the one raising the pack back up.
+  flayershaman: humanoid({
+    palette: {
+      skin: '#3f5a4a', cloth: '#26382c', cloth2: '#1b2a20', hair: '#1b2a20',
+      bone: COLORS.boneShadow, horn: '#8a8268', wood: COLORS.wood,
+      gem: COLORS.poison, trim: '#8a6a3a', metal: COLORS.darkSteel,
+    },
+    scale: 0.84,
+    parts: { horns: true, robe: true, hood: true, bareArms: true, fangs: true },
+    weapon: 'staff',
+    eyeColor: '#9aff5a', eyeGlow: true,
+    build: { ...IMP_BUILD, hunch: 0.2, headR: 7.1 },
+  }),
+
+  // Thorned hulk: a walking tree. Long heavy arms, a head sunk between the
+  // shoulders, thorns down both flanks and a crown of spines. No weapon -- the
+  // arms are the weapon, so they are drawn thicker than the barbarian's.
+  thornhulk: humanoid({
+    palette: {
+      skin: '#4a4030', cloth: '#3e3627', cloth2: '#2e2820', carapace: '#6a5f46',
+      quill: '#5e5238', hair: '#2a2a1e', bone: COLORS.boneShadow,
+      wood: '#3e3627', metal: COLORS.darkSteel, trim: '#5a4a30',
+    },
+    scale: 1.16,
+    parts: { spikes: true, quills: true, bareArms: true, bareLegs: true },
+    weapon: 'none',
+    eyeColor: '#c8d84a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...DEFAULT_BUILD,
+      shoulder: 15, torsoR: 8.6, armR: 4.2, foreR: 3.4,
+      upperArm: 12.5, foreArm: 12, thigh: 14, shin: 13,
+      hipU: 28, chestU: 42, neckU: 44, headU: 48, headR: 5.0,
+      thighR: 5.0, shinR: 3.8, hipSide: 6.2, hunch: 0.24, stance: 1.2,
+    },
+  }),
+
+  // Giant spider: eight legs, an abdomen dragged behind, and a head almost on
+  // the floor. The legs are what the eye counts, so they get the mass and the
+  // body stays small.
+  giantspider: humanoid({
+    palette: {
+      skin: '#3a3630', cloth: '#332f2a', cloth2: '#241f1c', chitin: '#403a32',
+      hair: '#241f1c', bone: COLORS.boneShadow, horn: '#6a5f4a',
+      metal: COLORS.darkSteel, wood: COLORS.wood, trim: '#4a4038',
+    },
+    scale: 0.9,
+    parts: { bugLegs: 4, noLegs: true, crawl: 2, shell: true, fangs: true },
+    weapon: 'none',
+    eyeColor: '#c83a3a', eyeGlow: true,
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: {
+      ...GRUB_BUILD,
+      hipU: 11, chestU: 15, neckU: 16, headU: 17, headR: 5.6,
+      torsoR: 7.0, shoulder: 6.5, hunch: 0.9,
+    },
+  }),
+
+  // Zealot: Zakarum's soldier. Plate over a robe, helm down, cloak, sword out.
+  // Human build, held straighter than the raider -- the difference between a
+  // bandit and a fanatic is entirely in the posture.
+  zealot: humanoid({
+    palette: {
+      skin: '#8a6a52', cloth: '#4a4a44', cloth2: '#3a3a36', trim: '#7a6a3a',
+      hair: '#241c16', metal: COLORS.darkSteel, wood: COLORS.wood,
+      cape: '#4a3a2a', bone: COLORS.boneShadow, boot: COLORS.leather,
+    },
+    scale: 1.0,
+    parts: { hood: true, cape: true, bareArms: true, belt: true },
+    weapon: 'sword',
+    eyeColor: '#e8d8a8',
+    anims: ['idle', 'walk', 'attack', 'death'],
+    build: { ...DEFAULT_BUILD, shoulder: 13, torsoR: 7.0, armR: 3.2, headR: 5.2, hunch: 0.05, stance: 1.06 },
+  }),
+
+  // Council member: the zealot's frame gone to seed under a high priest's robe.
+  // Gold at the throat and a staff instead of a blade, which is the whole
+  // difference between the man who swings and the man who orders it.
+  councilmember: humanoid({
+    palette: {
+      skin: '#5e4a3a', cloth: '#3a4a38', cloth2: '#2a3428', trim: COLORS.gold,
+      hair: '#1a1410', metal: COLORS.gold, wood: COLORS.wood, gem: COLORS.poison,
+      cape: '#33402f', bone: COLORS.boneShadow, boot: COLORS.leather,
+    },
+    scale: 1.0,
+    parts: { robe: true, hood: true, cape: true, belt: true },
+    weapon: 'staff',
+    eyeColor: '#ffca4a', eyeGlow: true,
+    build: {
+      ...DEFAULT_BUILD, shoulder: 12.5, torsoR: 7.6, headR: 5.3, hunch: 0.12,
+      hipU: 31, chestU: 45, neckU: 47, headU: 52,
+    },
+  }),
+
+  // Mephisto. He does not walk: `float` lifts him off the floor and hangs his
+  // legs, and the hover bob is the only motion the walk has. Built squat and
+  // heavy rather than tall, so the robe trailing under him has somewhere to go
+  // and nothing pokes out of the top of the cell at boss scale.
+  mephisto: humanoid({
+    palette: {
+      skin: '#4e5a66', cloth: '#2b2a3c', cloth2: '#20202e', carapace: '#3a4450',
+      quill: '#4a5460', hair: '#20202e', bone: COLORS.boneWhite,
+      metal: COLORS.darkSteel, wood: COLORS.wood, trim: '#7a7f8a', gem: COLORS.ice,
+    },
+    scale: 1.06,
+    float: true,
+    parts: { robe: true, spikes: true, quills: true, bareArms: true, fangs: true },
+    weapon: 'none',
+    eyeColor: '#9adcff', eyeGlow: true,
+    build: {
+      ...DEFAULT_BUILD,
+      hipU: 28, chestU: 40, neckU: 42, headU: 46, headR: 6.6,
+      torsoR: 8.4, shoulder: 14, armR: 3.6, foreR: 3.0,
+      upperArm: 11.5, foreArm: 11, hunch: 0.24,
+    },
   }),
 };
 

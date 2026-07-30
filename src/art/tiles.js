@@ -37,7 +37,22 @@ export const TERRAIN = {
   crypt:  { base: '#3e3e48', alt: '#33333c', speck: '#4c4c58', rough: 0.15 },
   blood:  { base: '#402220', alt: '#331b19', speck: '#522823', rough: 0.34 },
   snow:   { base: '#6f7482', alt: '#5f6472', speck: '#848a98', rough: 0.22 },
+  // The desert is not yellow. The sun has cooked the colour out of it: bleached
+  // bone laid over grey, with the warmth only just surviving in the speckle.
+  // Sandstone is the same rock quarried and laid, so it sits a shade cooler and
+  // takes slab joints instead of grit.
+  sand:      { base: '#6b6353', alt: '#5c5546', speck: '#7a7260', rough: 0.26 },
+  sandstone: { base: '#635c4d', alt: '#555044', speck: '#6f6857', rough: 0.14 },
+  // The jungle is not green either. A canopy this deep leaves the floor nearly
+  // black, and what green does reach it belongs to the rot, not the leaves.
+  jungle:    { base: '#2b3425', alt: '#232b1e', speck: '#3c4726', rough: 0.30 },
+  temple:    { base: '#3c413a', alt: '#333831', speck: '#4a5142', rough: 0.15 },
 };
+
+// Floors that read as laid masonry: two-tile slabs with a tone step and a
+// joint, rather than dirt. Their walls take courses for the same reason. `cave`
+// is built but not on this list -- its walls are hewn rock and want cracks.
+const BUILT_FLOORS = new Set(['cobble', 'crypt', 'sandstone', 'temple']);
 
 // ------------------------------------------------------------------- ground
 
@@ -64,6 +79,16 @@ function wrapNoise(rng, pw, ph, cell) {
 
 const clampB = (v) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
 const mulC = (c, k) => packRGB(clampB((c & 255) * k), clampB(((c >>> 8) & 255) * k), clampB(((c >>> 16) & 255) * k), 255);
+
+// Plot into the field with wrap, so a detail stroke that runs off one edge comes
+// back in on the other and the field still tiles with itself. The scattered
+// speckles get away without this because they are a pixel or two wide; a ripple
+// forty pixels long would leave a visible cut.
+function wrapPx(buf, x, y, c) {
+  let xx = (x | 0) % FIELD_W; if (xx < 0) xx += FIELD_W;
+  let yy = (y | 0) % FIELD_H; if (yy < 0) yy += FIELD_H;
+  px(buf, xx, yy, c);
+}
 
 // One seamless texture per terrain. Three octaves: broad patches, a mid
 // grain, and a fine speckle. The broad cell is two tiles wide on purpose --
@@ -103,10 +128,50 @@ function bakeGroundField(terrain, rng) {
       if (rd.chance(0.5)) px(buf, x + 1, y, dim);
     }
   }
-  if (terrain === 'dirt' || terrain === 'cave' || terrain === 'snow') {
+  if (terrain === 'dirt' || terrain === 'cave' || terrain === 'snow' || terrain === 'sand') {
     for (let i = 0; i < 70; i++) {
       const sp = rd.chance(0.5) ? packHex(t.speck) : shift(t.alt, -0.05);
       ellipseF(buf, rd.i(FIELD_W), rd.i(FIELD_H), rd.range(0.8, 2.2), rd.range(0.6, 1.3), sp);
+    }
+  }
+
+  // Wind ripples. Without them sand is grey mud: the ripple is the only thing
+  // that says a desert floor is loose and blown, and it has to cross tiles or
+  // it just draws the grid again. A lit crest with its own shadow under it.
+  if (terrain === 'sand') {
+    const crest = shift(t.speck, 0.03), trough = shift(t.alt, -0.06);
+    for (let i = 0; i < 26; i++) {
+      const x0 = rd.i(FIELD_W), y0 = rd.i(FIELD_H);
+      const len = rd.int(22, 52), amp = rd.range(1.5, 4), ph = rd.range(0, Math.PI * 2);
+      for (let k = 0; k < len; k++) {
+        const y = y0 + Math.sin(ph + k * 0.16) * amp;
+        wrapPx(buf, x0 + k, y, crest);
+        wrapPx(buf, x0 + k, y + 1, trough);
+      }
+    }
+  }
+
+  // Jungle floor: standing rot in dark pools, then pale litter over the top of
+  // it. Twice the tufts grass gets, because nothing here has been walked on.
+  if (terrain === 'jungle') {
+    const frond = packHex(t.speck), damp = shift(t.alt, -0.07);
+    for (let i = 0; i < 34; i++) {
+      ellipseF(buf, rd.i(FIELD_W), rd.i(FIELD_H), rd.range(2.5, 6.5), rd.range(1.4, 3.2), damp);
+    }
+    for (let i = 0; i < 210; i++) {
+      const x = rd.i(FIELD_W), y = rd.int(1, FIELD_H - 2);
+      px(buf, x, y, frond);
+      px(buf, x, y - 1, frond);
+      if (rd.chance(0.4)) px(buf, x + 1, y, damp);
+    }
+  }
+
+  // Temple stone is older than the jungle around it: the moss goes down before
+  // the slab joints, so the joints read as growing out of it.
+  if (terrain === 'temple') {
+    const moss = packHex('#2f3a26');
+    for (let i = 0; i < 44; i++) {
+      ellipseF(buf, rd.i(FIELD_W), rd.i(FIELD_H), rd.range(1.5, 4.5), rd.range(1, 2.4), moss);
     }
   }
   if (terrain === 'blood') {
@@ -119,7 +184,7 @@ function bakeGroundField(terrain, rng) {
   // Built floors read as masonry, but on two-tile slabs: joints on the
   // doubled lattice with a per-slab tone step. Slabs big enough that the
   // masonry does not trace the gameplay grid back onto the screen.
-  if (terrain === 'cobble' || terrain === 'crypt') {
+  if (BUILT_FLOORS.has(terrain)) {
     const joint = shift(t.alt, -0.06);
     for (let a = -2; a <= 4; a++) {
       for (let b = -2; b <= 4; b++) {
@@ -190,6 +255,14 @@ const WALL_STYLE = {
   dirt:   { face: '#4c4335', h: 24 },
   blood:  { face: '#3e3128', h: 26 },
   snow:   { face: '#5c6170', h: 26 },
+  // Sand banks are low and soft -- a dune is a shape you walk around, not a
+  // cliff. Sandstone is a built wall, tomb height. Jungle walls are a mass of
+  // foliage: tall enough to close the view down, and unbuilt so the canopy on
+  // top is cut from the same ground field as the floor.
+  sand:      { face: '#5a5344', h: 22 },
+  sandstone: { face: '#5d5646', top: '#6a6252', h: 44, built: true },
+  jungle:    { face: '#2a3122', h: 34 },
+  temple:    { face: '#3a3f38', top: '#454b41', h: 46, built: true },
 };
 
 // The two visible faces of one block, top left empty. Face texture does not
@@ -204,8 +277,14 @@ function bakeWallFace(terrain, rng) {
 
   const faceL = shift(s.face, -0.07);
   const faceR = shift(s.face, 0.03);
+  // Foliage is not stone: it wants a second, finer octave on top of the broad
+  // one, so the face breaks into leaf-sized clumps instead of reading as a
+  // painted green plank. Mottling inside the fill is spill-proof, which
+  // scattering clumps over the face afterwards would not be.
+  const leafy = terrain === 'jungle';
   const shade = (c, x, y, amt) => {
-    const n = (noise(nx + x * 0.12, ny + y * 0.12) - 0.5) * amt;
+    let n = (noise(nx + x * 0.12, ny + y * 0.12) - 0.5) * amt;
+    if (leafy) n += (noise(nx + 40 + x * 0.5, ny + 40 + y * 0.5) - 0.5) * 0.5;
     return mulC(c, 1 + n);
   };
 
@@ -213,7 +292,7 @@ function bakeWallFace(terrain, rng) {
   polyF(buf, [32, 31, 64, 16, 64, 16 + H, 32, 31 + H], 0, (x, y) => shade(faceR, x, y, 0.34));
 
   // Masonry courses on built walls, cracks on natural rock.
-  if (s.built && (terrain === 'crypt' || terrain === 'cobble')) {
+  if (s.built && BUILT_FLOORS.has(terrain)) {
     const dark = packRGB(0, 0, 0, 70);
     for (let k = 1; k * 12 < H; k++) {
       const yy = 31 + k * 12;
@@ -547,13 +626,237 @@ function propPalisade(rng) {
   return { canvas: bufToCanvas(buf), ox: 12, oy: 53 };
 }
 
+// ------------------------------------------------------------- desert props
+
+// A palm has no canopy to hide behind: bare trunk, crown on top, and the whole
+// read rests on the bend of the trunk and the droop of the fronds. Drawn in two
+// tapering sections so the bend is a curve rather than a hinge.
+function propPalm(rng) {
+  const buf = new Buf(84, 120);
+  const bark = ramp('#4a4030');
+  const frond = ramp(rng.chance(0.5) ? '#39462b' : '#2f3c23');
+  const lean = rng.range(-10, 10);
+  const midX = 42 + lean * 0.35, topX = 42 + lean, topY = 36;
+  capsule(buf, 42, 114, 6.5, midX, 76, 5, bark);
+  capsule(buf, midX, 76, 5, topX, topY, 3.8, bark);
+  // Frond scars up the trunk: the only detail a palm carries.
+  for (let k = 1; k < 7; k++) {
+    const t = k / 7;
+    const x = 42 + (topX - 42) * t * 0.7, y = 114 - t * 62;
+    lineP(buf, x - 4, y, x + 4, y - 1, packRGB(0, 0, 0, 60));
+  }
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + rng.range(-0.12, 0.12);
+    const mx = topX + Math.cos(a) * 17, my = topY + Math.sin(a) * 7 - 7;
+    const ex = topX + Math.cos(a) * 26, ey = my + 13;
+    capsule(buf, topX, topY, 3.2, mx, my, 2.2, frond);
+    capsule(buf, mx, my, 2.2, ex, ey, 0.6, frond);
+  }
+  ellipse(buf, topX, topY + 1, 4.5, 3.5, bark);
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: 42, oy: 114 };
+}
+
+// Barrel trunk, one or two arms, vertical ribs and spines along the edges. The
+// green is grey with a memory of green in it, which is what desert plants are.
+function propCactus(rng) {
+  const buf = new Buf(46, 78);
+  const flesh = ramp('#3f4a37');
+  const spine = packHex('#8a8266');
+  const base = 70, H = rng.int(38, 50);
+  capsule(buf, 23, base, 9.5, 23, base - H, 7.5, flesh);
+  // Arms carry the whole silhouette, so they are thick and they climb: drawn
+  // thin they read as twigs and the plant goes back to being a green pill.
+  for (let i = 0; i < rng.int(1, 2); i++) {
+    const s = i === 0 ? -1 : 1;
+    const y = base - H * rng.range(0.38, 0.58);
+    capsule(buf, 23, y, 5, 23 + s * 12, y - 2, 4.4, flesh);
+    capsule(buf, 23 + s * 12, y - 2, 4.4, 23 + s * 12, y - rng.int(16, 24), 3.6, flesh);
+  }
+  for (let k = 0; k < 4; k++) {
+    const x = 19 + k * 3;
+    lineP(buf, x, base - 2, x, base - H + 2, packRGB(0, 0, 0, 55));
+  }
+  // Spines ride the silhouette, so they follow the taper rather than a fixed
+  // column -- off the edge they would just be dots with an outline round them.
+  for (let i = 0; i < 20; i++) {
+    const y = rng.int(base - H + 2, base - 2);
+    const r = 9.5 - ((base - y) / H) * 2;
+    px(buf, 23 + (rng.chance(0.5) ? -1 : 1) * (r - 1), y, spine);
+  }
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: 23, oy: 71 };
+}
+
+// A tapered shaft with a pyramid cap: two faces meeting on a vertical edge at
+// the projection's own angle, so it stands as a solid instead of a painted
+// plank. Carved bands follow the same slope the wall courses use.
+function propObelisk(rng) {
+  const buf = new Buf(46, 108);
+  const stone = ramp('#5f5747');
+  const cx = 23, bot = 90, top = 24;
+  const wb = 13, wt = 8.5;
+  polyF(buf, [cx - wb, bot, cx, bot + wb / 2, cx, top + wt / 2, cx - wt, top], stone.base);
+  polyF(buf, [cx + wb, bot, cx, bot + wb / 2, cx, top + wt / 2, cx + wt, top], stone.dark);
+  polyF(buf, [cx - wt, top, cx, top + wt / 2, cx, top - 18], stone.light);
+  polyF(buf, [cx + wt, top, cx, top + wt / 2, cx, top - 18], stone.base);
+  const carve = packRGB(0, 0, 0, 70);
+  for (let k = 1; k < 5; k++) {
+    const y = top + ((bot - top) * k) / 5;
+    const w = wt + ((wb - wt) * k) / 5;
+    lineP(buf, cx - w, y, cx, y + w / 2, carve);
+    lineP(buf, cx, y + w / 2, cx + w, y, carve);
+  }
+  for (let i = 0; i < 7; i++) {
+    const y = rng.int(top + 8, bot - 8);
+    lineP(buf, cx - 4, y, cx - 1, y, carve);
+  }
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: cx, oy: bot + 6 };
+}
+
+// A stone coffin, lid slightly proud of the box so the overhang catches the
+// light. The carved figure on the lid is two strokes; anything more is mud at
+// this size.
+function propSarcophagus(rng) {
+  const buf = new Buf(56, 52);
+  const stone = ramp('#5a5445');
+  const cx = 28, top = 14, hw = 24, hh = 12, H = 17;
+  polyF(buf, [cx - hw, top + hh, cx, top + hh + hh, cx, top + hh + hh + H, cx - hw, top + hh + H], stone.dark);
+  polyF(buf, [cx + hw, top + hh, cx, top + hh + hh, cx, top + hh + hh + H, cx + hw, top + hh + H], stone.deep);
+  polyF(buf, [cx - hw, top + hh, cx, top, cx + hw, top + hh, cx, top + hh * 2], stone.base);
+  // The lid sits proud of the box. Kept a band lighter than the sides and no
+  // more: painted at full highlight the whole coffin reads as a dust sheet.
+  const lid = 3;
+  polyF(buf, [cx - hw + 4, top + hh - lid, cx, top - lid, cx + hw - 4, top + hh - lid, cx, top + hh * 2 - lid - 2], stone.light);
+  const carve = packRGB(0, 0, 0, 90);
+  lineP(buf, cx - hw + 4, top + hh, cx, top + hh * 2, carve);
+  lineP(buf, cx + hw - 4, top + hh, cx, top + hh * 2, carve);
+  lineP(buf, cx - 9, top + hh - lid, cx + 9, top + hh - lid + 4, carve);
+  lineP(buf, cx - 4, top + hh - lid - 4, cx - 4, top + hh - lid + 6, carve);
+  if (rng.chance(0.5)) lineP(buf, cx + 4, top + hh - lid - 2, cx + 4, top + hh - lid + 6, carve);
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: cx, oy: top + hh * 2 + H - 2 };
+}
+
+// A clay jar. Fat belly, short neck, a lip wide enough to read, and one painted
+// band -- the sort of thing left standing in a tomb for somebody to smash.
+function propUrn(rng) {
+  const buf = new Buf(30, 40);
+  const clay = ramp(rng.chance(0.5) ? '#5e4634' : '#54402f');
+  ellipse(buf, 15, 24, 9, 10, clay);
+  capsule(buf, 15, 16, 4.5, 15, 11, 4, clay);
+  ellipse(buf, 15, 10, 6.5, 3, ramp('#6a5038'));
+  lineP(buf, 7, 22, 23, 22, packRGB(0, 0, 0, 60));
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: 15, oy: 34 };
+}
+
+// ------------------------------------------------------------- jungle props
+
+// A clump of arcing fronds from one root, with short pinnae off each spine --
+// without those it is a handful of grass.
+function propFern(rng) {
+  const buf = new Buf(68, 62);
+  const leaf = ramp(rng.chance(0.5) ? '#33422a' : '#2b3823');
+  const cx = 34, root = 54;
+  for (let i = 0; i < 8; i++) {
+    const a = -Math.PI * (0.1 + (i / 7) * 0.8) + rng.range(-0.07, 0.07);
+    const L = rng.range(22, 31);
+    const mx = cx + Math.cos(a) * L * 0.6, my = root + Math.sin(a) * L * 0.6;
+    const ex = cx + Math.cos(a) * L, ey = my + rng.range(3, 8);
+    capsule(buf, cx, root, 3.2, mx, my, 2.2, leaf);
+    capsule(buf, mx, my, 2.2, ex, ey, 0.6, leaf);
+    // Pinnae off each spine. Without them the clump is a handful of grass.
+    for (let k = 1; k < 5; k++) {
+      const t = k / 5;
+      const sx = cx + (ex - cx) * t, sy = root + (ey - root) * t;
+      lineP(buf, sx, sy, sx + Math.cos(a + 1.3) * 5, sy + Math.sin(a + 1.3) * 4, leaf.dark);
+      lineP(buf, sx, sy, sx + Math.cos(a - 1.3) * 5, sy + Math.sin(a - 1.3) * 4, leaf.deep);
+    }
+  }
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: cx, oy: 56 };
+}
+
+// Vines off a limb overhead. The limb itself is drawn -- three bare strands
+// without it read as a ladder rather than as something hanging, which is the
+// one thing this prop has to say. Strands swing out before they fall, and stop
+// short of the ground so the canopy above stays implied.
+function propVine(rng) {
+  const buf = new Buf(52, 100);
+  const stem = ramp('#2f3a24');
+  const leaf = ramp('#35442a');
+  const bark = ramp('#3a3226');
+  capsule(buf, 3, 10, 3.4, 48, 6, 2.6, bark);
+  for (let i = 0; i < 3; i++) {
+    const anchor = 10 + i * 15 + rng.range(-3, 3);
+    let x = anchor, y = 10;
+    // Swing out, then fall: the lateral drift decays as the strand loses the
+    // push it started with, which is what a hanging curve looks like.
+    let drift = rng.range(-1.5, 1.5);
+    const len = rng.int(54, 84);
+    while (y < len) {
+      const nx = Math.max(5, Math.min(47, x + drift * 7)), ny = y + 9;
+      capsule(buf, x, y, 2.4, nx, ny, 2.1, stem);
+      for (const s of rng.chance(0.4) ? [-1, 1] : [rng.chance(0.5) ? -1 : 1]) {
+        ellipse(buf, nx + s * 4, ny - 2, 4, 2.6, leaf);
+      }
+      x = nx; y = ny;
+      drift *= 0.62;
+    }
+    ellipse(buf, x, y + 1, 3, 3.6, leaf);
+  }
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: 26, oy: 96 };
+}
+
+// A carved figure on a plinth: broad shoulders, a head sunk between them, arms
+// folded across the belly. The body has to out-mass the head or the whole thing
+// reads as a snowman. Sockets stay dark -- nothing here lights itself but fire.
+function propIdol(rng) {
+  const buf = new Buf(48, 78);
+  const stone = ramp('#4a4c42');
+  const moss = ramp('#33402c');
+  const cx = 24, base = 68, plinth = 10;
+  polyF(buf, [cx - 16, base - plinth, cx, base - plinth + 8, cx + 16, base - plinth, cx, base - plinth - 8], stone.base);
+  polyF(buf, [cx - 16, base - plinth, cx, base - plinth + 8, cx, base, cx - 16, base - plinth + 8], stone.dark);
+  polyF(buf, [cx + 16, base - plinth, cx, base - plinth + 8, cx, base, cx + 16, base - plinth + 8], stone.deep);
+  capsule(buf, cx, base - plinth - 4, 13, cx, base - plinth - 28, 12.5, stone);
+  capsule(buf, cx - 12, base - plinth - 30, 5, cx + 12, base - plinth - 30, 5, stone);
+  ellipse(buf, cx, base - plinth - 39, 9, 8.5, stone);
+  const dark = packRGB(0, 0, 0, 130);
+  ellipseF(buf, cx - 3.5, base - plinth - 41, 2.2, 1.8, dark);
+  ellipseF(buf, cx + 3.5, base - plinth - 41, 2.2, 1.8, dark);
+  rectF(buf, cx - 4, base - plinth - 35, 8, 2, dark);
+  // Arms folded, and a carved band under them: two lines of relief is all the
+  // carving that survives at this size.
+  capsule(buf, cx - 11, base - plinth - 19, 4, cx + 11, base - plinth - 17, 4, stone);
+  lineP(buf, cx - 11, base - plinth - 10, cx + 11, base - plinth - 10, dark);
+  for (let i = 0; i < 7; i++) {
+    ellipse(buf, cx + rng.range(-9, 9), base - plinth - rng.range(4, 34), rng.range(2, 4.5), rng.range(1.5, 3), moss);
+  }
+  outline(buf, OUTLINE);
+  return { canvas: bufToCanvas(buf), ox: cx, oy: base };
+}
+
 const PROP_BAKERS = {
   tree: propTree, rock: propRock, column: propColumn, brazier: propBrazier,
   torch: propTorch, barrel: propBarrel, chest: propChest, gravestone: propGrave,
   bones: propBones, waypoint: propWaypoint, portal: propPortal, stairs: propStairs,
   tent: propTent, wagon: propWagon, anvil: propAnvil, campfire: propCampfire,
   crate: propCrate, palisade: propPalisade,
+  palm: propPalm, cactus: propCactus, obelisk: propObelisk,
+  sarcophagus: propSarcophagus, urn: propUrn,
+  fern: propFern, vine: propVine, idol: propIdol,
 };
+
+// Props scattered in numbers need variants or a stand of palms looks stamped.
+// One bake of anything that stands alone.
+const PROP_VARIANTS = new Set([
+  'tree', 'rock', 'gravestone', 'bones', 'tent', 'crate', 'palisade',
+  'palm', 'cactus', 'fern', 'vine', 'urn',
+]);
 
 // ------------------------------------------------------------------ exports
 
@@ -593,8 +896,7 @@ export function* bakeTiles() {
     yield { label: 'walls ' + t };
   }
   for (const name of Object.keys(PROP_BAKERS)) {
-    // A few variants of the scattered natural props, one of everything else.
-    const n = ['tree', 'rock', 'gravestone', 'bones', 'tent', 'crate', 'palisade'].includes(name) ? 4 : 1;
+    const n = PROP_VARIANTS.has(name) ? 4 : 1;
     PROPS[name] = [];
     for (let i = 0; i < n; i++) PROPS[name].push(PROP_BAKERS[name](rng.fork(name + i)));
     yield { label: 'prop ' + name };
