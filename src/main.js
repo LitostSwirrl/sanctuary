@@ -650,6 +650,10 @@ function openContainer(p) {
 // ------------------------------------------------------------------- update
 
 function checkTransitions(dt) {
+  // The killing blow lands in the middle of the step, so this pass runs once
+  // more on the frame you died: a corpse must not walk through the door it fell
+  // against, light a waypoint, or pick its own gold back up off the floor.
+  if (state === 'dead') return;
   transitionCool -= dt;
   if (transitionCool > 0) return;
 
